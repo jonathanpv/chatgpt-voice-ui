@@ -26,11 +26,13 @@ import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
+  SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
+  SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
@@ -171,7 +173,7 @@ function ChatSidebar({
         <div className="flex flex-row items-center gap-2 px-2">
           <div className="bg-primary/10 size-8 rounded-md"></div>
           <div className="text-md font-base text-primary tracking-tight">
-            zola.chat
+            abundantui
           </div>
         </div>
         <Button variant="ghost" className="size-8">
@@ -191,29 +193,37 @@ function ChatSidebar({
         {conversationHistory.map((group) => (
           <SidebarGroup key={group.period}>
             <SidebarGroupLabel>{group.period}</SidebarGroupLabel>
-            <SidebarMenu>
-              {group.conversations.map((conversation) => (
-                <SidebarMenuButton key={conversation.id}>
-                  <span>{conversation.title}</span>
-                </SidebarMenuButton>
-              ))}
-            </SidebarMenu>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.conversations.map((conversation) => (
+                  <SidebarMenuItem key={conversation.id}>
+                    <SidebarMenuButton>
+                      <span>{conversation.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
           </SidebarGroup>
         ))}
         <SidebarGroup>
           <SidebarGroupLabel>Settings</SidebarGroupLabel>
-          <SidebarMenu>
-            <SidebarMenuButton
-              onClick={() =>
-                setIsAudioPlaybackEnabled((prev) => !prev)
-              }
-            >
-              <span>Audio playback</span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {isAudioPlaybackEnabled ? "On" : "Off"}
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenu>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() =>
+                    setIsAudioPlaybackEnabled((prev) => !prev)
+                  }
+                >
+                  <span>Audio playback</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {isAudioPlaybackEnabled ? "On" : "Off"}
+                  </span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
     </Sidebar>
@@ -231,6 +241,8 @@ type ChatContentProps = {
   setPrompt: (value: string) => void;
   isLoading: boolean;
   isReady: boolean;
+  isVoiceEnabled: boolean;
+  onToggleVoice: () => void;
   chatMessages: ChatMessage[];
   onSubmit: () => void;
 };
@@ -240,9 +252,13 @@ function ChatContent({
   setPrompt,
   isLoading,
   isReady,
+  isVoiceEnabled,
+  onToggleVoice,
   chatMessages,
   onSubmit,
 }: ChatContentProps) {
+  const isPromptDisabled = isVoiceEnabled && !isReady;
+
   return (
     <main className="flex h-screen flex-col overflow-hidden">
       <header className="bg-background z-10 flex h-16 w-full shrink-0 items-center gap-2 border-b px-4">
@@ -365,12 +381,18 @@ function ChatContent({
             value={prompt}
             onValueChange={setPrompt}
             onSubmit={onSubmit}
-            disabled={!isReady}
+            disabled={isPromptDisabled}
             className="border-input bg-popover relative z-10 w-full rounded-3xl border p-0 pt-1 shadow-xs"
           >
             <div className="flex flex-col">
               <PromptInputTextarea
-                placeholder={isReady ? "Ask anything" : "Connecting..."}
+                placeholder={
+                  isVoiceEnabled
+                    ? isReady
+                      ? "Ask anything"
+                      : "Connecting..."
+                    : "Enable voice to start"
+                }
                 className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
               />
 
@@ -381,13 +403,18 @@ function ChatContent({
                       variant="outline"
                       size="icon"
                       className="size-9 rounded-full"
+                      disabled={!isReady}
                     >
                       <Plus size={18} />
                     </Button>
                   </PromptInputAction>
 
                   <PromptInputAction tooltip="Search">
-                    <Button variant="outline" className="rounded-full">
+                    <Button
+                      variant="outline"
+                      className="rounded-full"
+                      disabled={!isReady}
+                    >
                       <Globe size={18} />
                       Search
                     </Button>
@@ -398,19 +425,24 @@ function ChatContent({
                       variant="outline"
                       size="icon"
                       className="size-9 rounded-full"
+                      disabled={!isReady}
                     >
                       <MoreHorizontal size={18} />
                     </Button>
                   </PromptInputAction>
                 </div>
                 <div className="flex items-center gap-2">
-                  <PromptInputAction tooltip="Voice input">
+                  <PromptInputAction
+                    tooltip={isVoiceEnabled ? "Disable voice" : "Enable voice"}
+                    allowWhenDisabled
+                  >
                     <Button
-                      variant="outline"
-                      size="icon"
-                      className="size-9 rounded-full"
+                      variant={isVoiceEnabled ? "default" : "outline"}
+                      className="rounded-full"
+                      onClick={onToggleVoice}
                     >
                       <Mic size={18} />
+                      {isVoiceEnabled ? "Voice on" : "Enable voice"}
                     </Button>
                   </PromptInputAction>
 
@@ -439,6 +471,8 @@ function ChatContent({
 function FullChatApp({
   isAudioPlaybackEnabled,
   setIsAudioPlaybackEnabled,
+  isVoiceEnabled,
+  onToggleVoice,
   prompt,
   setPrompt,
   isLoading,
@@ -448,6 +482,8 @@ function FullChatApp({
 }: {
   isAudioPlaybackEnabled: boolean;
   setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  isVoiceEnabled: boolean;
+  onToggleVoice: () => void;
   prompt: string;
   setPrompt: (value: string) => void;
   isLoading: boolean;
@@ -456,7 +492,7 @@ function FullChatApp({
   onSubmit: () => void;
 }) {
   return (
-    <SidebarProvider defaultOpen={false}>
+    <SidebarProvider>
       <ChatSidebar
         isAudioPlaybackEnabled={isAudioPlaybackEnabled}
         setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
@@ -467,6 +503,8 @@ function FullChatApp({
           setPrompt={setPrompt}
           isLoading={isLoading}
           isReady={isReady}
+          isVoiceEnabled={isVoiceEnabled}
+          onToggleVoice={onToggleVoice}
           chatMessages={chatMessages}
           onSubmit={onSubmit}
         />
@@ -512,6 +550,7 @@ function App() {
 
   const {
     connect,
+    disconnect,
     sendUserText,
     sendEvent,
     interrupt,
@@ -534,6 +573,11 @@ function App() {
       return stored ? stored === "true" : true;
     }
   );
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const stored = localStorage.getItem("voiceEnabled");
+    return stored ? stored === "true" : false;
+  });
 
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
     try {
@@ -562,10 +606,18 @@ function App() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (!isVoiceEnabled) return;
     if (selectedAgentName && sessionStatus === "DISCONNECTED") {
       connectToRealtime();
     }
-  }, [selectedAgentName]);
+  }, [selectedAgentName, isVoiceEnabled]);
+
+  useEffect(() => {
+    if (isVoiceEnabled) return;
+    if (sessionStatus !== "DISCONNECTED") {
+      disconnect();
+    }
+  }, [isVoiceEnabled, sessionStatus, disconnect]);
 
   useEffect(() => {
     if (
@@ -698,6 +750,9 @@ function App() {
       isAudioPlaybackEnabled.toString()
     );
   }, [isAudioPlaybackEnabled]);
+  useEffect(() => {
+    localStorage.setItem("voiceEnabled", isVoiceEnabled.toString());
+  }, [isVoiceEnabled]);
 
   useEffect(() => {
     if (audioElementRef.current) {
@@ -752,6 +807,8 @@ function App() {
     <FullChatApp
       isAudioPlaybackEnabled={isAudioPlaybackEnabled}
       setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
+      isVoiceEnabled={isVoiceEnabled}
+      onToggleVoice={() => setIsVoiceEnabled((prev) => !prev)}
       prompt={prompt}
       setPrompt={setPrompt}
       isLoading={isLoading}
