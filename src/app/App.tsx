@@ -1,64 +1,487 @@
 "use client";
-import React, { useEffect, useRef, useState } from "react";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 
-import Image from "next/image";
-
-// UI components
-import Transcript from "./components/Transcript";
-import Events from "./components/Events";
-import BottomToolbar from "./components/BottomToolbar";
+import {
+  ChatContainerContent,
+  ChatContainerRoot,
+} from "@/components/prompt-kit/chat-container";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+} from "@/components/prompt-kit/message";
+import {
+  PromptInput,
+  PromptInputAction,
+  PromptInputActions,
+  PromptInputTextarea,
+} from "@/components/prompt-kit/prompt-input";
+import { ScrollButton } from "@/components/prompt-kit/scroll-button";
+import { Button } from "@/components/ui/button";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
+import {
+  ArrowUp,
+  Copy,
+  Globe,
+  Mic,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  PlusIcon,
+  Search,
+  ThumbsDown,
+  ThumbsUp,
+  Trash,
+} from "lucide-react";
 
 // Types
 import { SessionStatus } from "@/app/types";
-import type { RealtimeAgent } from '@openai/agents/realtime';
+import type { RealtimeAgent } from "@openai/agents/realtime";
 
 // Context providers & hooks
 import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
-import { useRealtimeSession } from "./hooks/useRealtimeSession";
+import { useRealtimeSession } from "@/app/hooks/useRealtimeSession";
 import { createModerationGuardrail } from "@/app/agentConfigs/guardrails";
 
 // Agent configs
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
-import { customerServiceRetailScenario } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorScenario } from "@/app/agentConfigs/chatSupervisor";
-import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
-import { simpleHandoffScenario } from "@/app/agentConfigs/simpleHandoff";
 
 // Map used by connect logic for scenarios defined via the SDK.
 const sdkScenarioMap: Record<string, RealtimeAgent[]> = {
-  simpleHandoff: simpleHandoffScenario,
-  customerServiceRetail: customerServiceRetailScenario,
   chatSupervisor: chatSupervisorScenario,
 };
 
-import useAudioDownload from "./hooks/useAudioDownload";
-import { useHandleSessionHistory } from "./hooks/useHandleSessionHistory";
+// Initial conversation history
+const conversationHistory = [
+  {
+    period: "Today",
+    conversations: [
+      {
+        id: "t1",
+        title: "Project roadmap discussion",
+        lastMessage:
+          "Let's prioritize the authentication features for the next sprint.",
+        timestamp: new Date().setHours(new Date().getHours() - 2),
+      },
+      {
+        id: "t2",
+        title: "API Documentation Review",
+        lastMessage:
+          "The endpoint descriptions need more detail about rate limiting.",
+        timestamp: new Date().setHours(new Date().getHours() - 5),
+      },
+      {
+        id: "t3",
+        title: "Frontend Bug Analysis",
+        lastMessage:
+          "I found the issue - we need to handle the null state in the user profile component.",
+        timestamp: new Date().setHours(new Date().getHours() - 8),
+      },
+    ],
+  },
+  {
+    period: "Yesterday",
+    conversations: [
+      {
+        id: "y1",
+        title: "Database Schema Design",
+        lastMessage:
+          "Let's add indexes to improve query performance on these tables.",
+        timestamp: new Date().setDate(new Date().getDate() - 1),
+      },
+      {
+        id: "y2",
+        title: "Performance Optimization",
+        lastMessage:
+          "The lazy loading implementation reduced initial load time by 40%.",
+        timestamp: new Date().setDate(new Date().getDate() - 1),
+      },
+    ],
+  },
+  {
+    period: "Last 7 days",
+    conversations: [
+      {
+        id: "w1",
+        title: "Authentication Flow",
+        lastMessage: "We should implement the OAuth2 flow with refresh tokens.",
+        timestamp: new Date().setDate(new Date().getDate() - 3),
+      },
+      {
+        id: "w2",
+        title: "Component Library",
+        lastMessage:
+          "These new UI components follow the design system guidelines perfectly.",
+        timestamp: new Date().setDate(new Date().getDate() - 5),
+      },
+      {
+        id: "w3",
+        title: "UI/UX Feedback",
+        lastMessage:
+          "The navigation redesign received positive feedback from the test group.",
+        timestamp: new Date().setDate(new Date().getDate() - 6),
+      },
+    ],
+  },
+  {
+    period: "Last month",
+    conversations: [
+      {
+        id: "m1",
+        title: "Initial Project Setup",
+        lastMessage:
+          "All the development environments are now configured consistently.",
+        timestamp: new Date().setDate(new Date().getDate() - 15),
+      },
+    ],
+  },
+];
+
+type ChatSidebarProps = {
+  isAudioPlaybackEnabled: boolean;
+  setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+};
+
+function ChatSidebar({
+  isAudioPlaybackEnabled,
+  setIsAudioPlaybackEnabled,
+}: ChatSidebarProps) {
+  return (
+    <Sidebar>
+      <SidebarHeader className="flex flex-row items-center justify-between gap-2 px-2 py-4">
+        <div className="flex flex-row items-center gap-2 px-2">
+          <div className="bg-primary/10 size-8 rounded-md"></div>
+          <div className="text-md font-base text-primary tracking-tight">
+            zola.chat
+          </div>
+        </div>
+        <Button variant="ghost" className="size-8">
+          <Search className="size-4" />
+        </Button>
+      </SidebarHeader>
+      <SidebarContent className="pt-4">
+        <div className="px-4">
+          <Button
+            variant="outline"
+            className="mb-4 flex w-full items-center gap-2"
+          >
+            <PlusIcon className="size-4" />
+            <span>New Chat</span>
+          </Button>
+        </div>
+        {conversationHistory.map((group) => (
+          <SidebarGroup key={group.period}>
+            <SidebarGroupLabel>{group.period}</SidebarGroupLabel>
+            <SidebarMenu>
+              {group.conversations.map((conversation) => (
+                <SidebarMenuButton key={conversation.id}>
+                  <span>{conversation.title}</span>
+                </SidebarMenuButton>
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        ))}
+        <SidebarGroup>
+          <SidebarGroupLabel>Settings</SidebarGroupLabel>
+          <SidebarMenu>
+            <SidebarMenuButton
+              onClick={() =>
+                setIsAudioPlaybackEnabled((prev) => !prev)
+              }
+            >
+              <span>Audio playback</span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {isAudioPlaybackEnabled ? "On" : "Off"}
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
+  );
+}
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
+type ChatContentProps = {
+  prompt: string;
+  setPrompt: (value: string) => void;
+  isLoading: boolean;
+  isReady: boolean;
+  chatMessages: ChatMessage[];
+  onSubmit: () => void;
+};
+
+function ChatContent({
+  prompt,
+  setPrompt,
+  isLoading,
+  isReady,
+  chatMessages,
+  onSubmit,
+}: ChatContentProps) {
+  return (
+    <main className="flex h-screen flex-col overflow-hidden">
+      <header className="bg-background z-10 flex h-16 w-full shrink-0 items-center gap-2 border-b px-4">
+        <SidebarTrigger className="-ml-1" />
+        <div className="text-foreground">Chat Supervisor</div>
+      </header>
+
+      <div className="relative flex-1 overflow-y-auto">
+        <ChatContainerRoot className="h-full">
+          <ChatContainerContent className="space-y-0 px-5 py-12">
+            {chatMessages.map((message, index) => {
+              const isAssistant = message.role === "assistant";
+              const isLastMessage = index === chatMessages.length - 1;
+
+              return (
+                <Message
+                  key={message.id}
+                  className={cn(
+                    "mx-auto flex w-full max-w-3xl flex-col gap-2 px-6",
+                    isAssistant ? "items-start" : "items-end"
+                  )}
+                >
+                  {isAssistant ? (
+                    <div className="group flex w-full flex-col gap-0">
+                      <MessageContent
+                        className="text-foreground prose flex-1 rounded-lg bg-transparent p-0"
+                        markdown
+                      >
+                        {message.content}
+                      </MessageContent>
+                      <MessageActions
+                        className={cn(
+                          "-ml-2.5 flex gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100",
+                          isLastMessage && "opacity-100"
+                        )}
+                      >
+                        <MessageAction tooltip="Copy" delayDuration={100}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-full"
+                          >
+                            <Copy />
+                          </Button>
+                        </MessageAction>
+                        <MessageAction tooltip="Upvote" delayDuration={100}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-full"
+                          >
+                            <ThumbsUp />
+                          </Button>
+                        </MessageAction>
+                        <MessageAction tooltip="Downvote" delayDuration={100}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-full"
+                          >
+                            <ThumbsDown />
+                          </Button>
+                        </MessageAction>
+                      </MessageActions>
+                    </div>
+                  ) : (
+                    <div className="group flex flex-col items-end gap-1">
+                      <MessageContent className="bg-muted text-primary max-w-[85%] rounded-3xl px-5 py-2.5 sm:max-w-[75%]">
+                        {message.content}
+                      </MessageContent>
+                      <MessageActions
+                        className={cn(
+                          "flex gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                        )}
+                      >
+                        <MessageAction tooltip="Edit" delayDuration={100}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-full"
+                          >
+                            <Pencil />
+                          </Button>
+                        </MessageAction>
+                        <MessageAction tooltip="Delete" delayDuration={100}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-full"
+                          >
+                            <Trash />
+                          </Button>
+                        </MessageAction>
+                        <MessageAction tooltip="Copy" delayDuration={100}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-full"
+                          >
+                            <Copy />
+                          </Button>
+                        </MessageAction>
+                      </MessageActions>
+                    </div>
+                  )}
+                </Message>
+              );
+            })}
+          </ChatContainerContent>
+          <div className="absolute bottom-4 left-1/2 flex w-full max-w-3xl -translate-x-1/2 justify-end px-5">
+            <ScrollButton className="shadow-sm" />
+          </div>
+        </ChatContainerRoot>
+      </div>
+
+      <div className="bg-background z-10 shrink-0 px-3 pb-3 md:px-5 md:pb-5">
+        <div className="mx-auto max-w-3xl">
+          <PromptInput
+            isLoading={isLoading}
+            value={prompt}
+            onValueChange={setPrompt}
+            onSubmit={onSubmit}
+            disabled={!isReady}
+            className="border-input bg-popover relative z-10 w-full rounded-3xl border p-0 pt-1 shadow-xs"
+          >
+            <div className="flex flex-col">
+              <PromptInputTextarea
+                placeholder={isReady ? "Ask anything" : "Connecting..."}
+                className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
+              />
+
+              <PromptInputActions className="mt-5 flex w-full items-center justify-between gap-2 px-3 pb-3">
+                <div className="flex items-center gap-2">
+                  <PromptInputAction tooltip="Add a new action">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-9 rounded-full"
+                    >
+                      <Plus size={18} />
+                    </Button>
+                  </PromptInputAction>
+
+                  <PromptInputAction tooltip="Search">
+                    <Button variant="outline" className="rounded-full">
+                      <Globe size={18} />
+                      Search
+                    </Button>
+                  </PromptInputAction>
+
+                  <PromptInputAction tooltip="More actions">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-9 rounded-full"
+                    >
+                      <MoreHorizontal size={18} />
+                    </Button>
+                  </PromptInputAction>
+                </div>
+                <div className="flex items-center gap-2">
+                  <PromptInputAction tooltip="Voice input">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-9 rounded-full"
+                    >
+                      <Mic size={18} />
+                    </Button>
+                  </PromptInputAction>
+
+                  <Button
+                    size="icon"
+                    disabled={!prompt.trim() || !isReady}
+                    onClick={onSubmit}
+                    className="size-9 rounded-full"
+                  >
+                    {!isLoading ? (
+                      <ArrowUp size={18} />
+                    ) : (
+                      <span className="size-3 rounded-xs bg-white" />
+                    )}
+                  </Button>
+                </div>
+              </PromptInputActions>
+            </div>
+          </PromptInput>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function FullChatApp({
+  isAudioPlaybackEnabled,
+  setIsAudioPlaybackEnabled,
+  prompt,
+  setPrompt,
+  isLoading,
+  isReady,
+  chatMessages,
+  onSubmit,
+}: {
+  isAudioPlaybackEnabled: boolean;
+  setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  prompt: string;
+  setPrompt: (value: string) => void;
+  isLoading: boolean;
+  isReady: boolean;
+  chatMessages: ChatMessage[];
+  onSubmit: () => void;
+}) {
+  return (
+    <SidebarProvider>
+      <ChatSidebar
+        isAudioPlaybackEnabled={isAudioPlaybackEnabled}
+        setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
+      />
+      <SidebarInset>
+        <ChatContent
+          prompt={prompt}
+          setPrompt={setPrompt}
+          isLoading={isLoading}
+          isReady={isReady}
+          chatMessages={chatMessages}
+          onSubmit={onSubmit}
+        />
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
 
 function App() {
   const searchParams = useSearchParams()!;
 
-  // ---------------------------------------------------------------------
-  // Codec selector – lets you toggle between wide-band Opus (48 kHz)
-  // and narrow-band PCMU/PCMA (8 kHz) to hear what the agent sounds like on
-  // a traditional phone line and to validate ASR / VAD behaviour under that
-  // constraint.
-  //
-  // We read the `?codec=` query-param and rely on the `changePeerConnection`
-  // hook (configured in `useRealtimeSession`) to set the preferred codec
-  // before the offer/answer negotiation.
-  // ---------------------------------------------------------------------
-  const urlCodec = searchParams.get("codec") || "opus";
-
-  // Agents SDK doesn't currently support codec selection so it is now forced 
-  // via global codecPatch at module load 
-
   const {
     addTranscriptMessage,
     addTranscriptBreadcrumb,
+    transcriptItems,
   } = useTranscript();
   const { logClientEvent, logServerEvent } = useEvent();
 
@@ -71,11 +494,11 @@ function App() {
   // Ref to identify whether the latest agent switch came from an automatic handoff
   const handoffTriggeredRef = useRef(false);
 
-  const sdkAudioElement = React.useMemo(() => {
-    if (typeof window === 'undefined') return undefined;
-    const el = document.createElement('audio');
+  const sdkAudioElement = useMemo(() => {
+    if (typeof window === "undefined") return undefined;
+    const el = document.createElement("audio");
     el.autoplay = true;
-    el.style.display = 'none';
+    el.style.display = "none";
     document.body.appendChild(el);
     return el;
   }, []);
@@ -89,7 +512,6 @@ function App() {
 
   const {
     connect,
-    disconnect,
     sendUserText,
     sendEvent,
     interrupt,
@@ -104,34 +526,23 @@ function App() {
 
   const [sessionStatus, setSessionStatus] =
     useState<SessionStatus>("DISCONNECTED");
-
-  const [isEventsPaneExpanded, setIsEventsPaneExpanded] =
-    useState<boolean>(true);
-  const [userText, setUserText] = useState<string>("");
-  const [isPTTActive, setIsPTTActive] = useState<boolean>(false);
-  const [isPTTUserSpeaking, setIsPTTUserSpeaking] = useState<boolean>(false);
+  const [prompt, setPrompt] = useState<string>("");
   const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState<boolean>(
     () => {
-      if (typeof window === 'undefined') return true;
-      const stored = localStorage.getItem('audioPlaybackEnabled');
-      return stored ? stored === 'true' : true;
-    },
+      if (typeof window === "undefined") return true;
+      const stored = localStorage.getItem("audioPlaybackEnabled");
+      return stored ? stored === "true" : true;
+    }
   );
-
-  // Initialize the recording hook.
-  const { startRecording, stopRecording, downloadRecording } =
-    useAudioDownload();
 
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
     try {
       sendEvent(eventObj);
       logClientEvent(eventObj, eventNameSuffix);
     } catch (err) {
-      console.error('Failed to send via SDK', err);
+      console.error("Failed to send via SDK", err);
     }
   };
-
-  useHandleSessionHistory();
 
   useEffect(() => {
     let finalAgentConfig = searchParams.get("agentConfig");
@@ -172,12 +583,6 @@ function App() {
     }
   }, [selectedAgentConfigSet, selectedAgentName, sessionStatus]);
 
-  useEffect(() => {
-    if (sessionStatus === "CONNECTED") {
-      updateSession();
-    }
-  }, [isPTTActive]);
-
   const fetchEphemeralKey = async (): Promise<string | null> => {
     logClientEvent({ url: "/session" }, "fetch_session_token_request");
     const tokenResponse = await fetch("/api/session");
@@ -206,15 +611,15 @@ function App() {
 
         // Ensure the selectedAgentName is first so that it becomes the root
         const reorderedAgents = [...sdkScenarioMap[agentSetKey]];
-        const idx = reorderedAgents.findIndex((a) => a.name === selectedAgentName);
+        const idx = reorderedAgents.findIndex(
+          (a) => a.name === selectedAgentName
+        );
         if (idx > 0) {
           const [agent] = reorderedAgents.splice(idx, 1);
           reorderedAgents.unshift(agent);
         }
 
-        const companyName = agentSetKey === 'customerServiceRetail'
-          ? customerServiceRetailCompanyName
-          : chatSupervisorCompanyName;
+        const companyName = chatSupervisorCompanyName;
         const guardrail = createModerationGuardrail(companyName);
 
         await connect({
@@ -234,44 +639,34 @@ function App() {
     }
   };
 
-  const disconnectFromRealtime = () => {
-    disconnect();
-    setSessionStatus("DISCONNECTED");
-    setIsPTTUserSpeaking(false);
-  };
-
   const sendSimulatedUserMessage = (text: string) => {
     const id = uuidv4().slice(0, 32);
     addTranscriptMessage(id, "user", text, true);
 
     sendClientEvent({
-      type: 'conversation.item.create',
+      type: "conversation.item.create",
       item: {
         id,
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text }],
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text }],
       },
     });
-    sendClientEvent({ type: 'response.create' }, '(simulated user text message)');
+    sendClientEvent({ type: "response.create" }, "(simulated user text message)");
   };
 
   const updateSession = (shouldTriggerResponse: boolean = false) => {
-    // Reflect Push-to-Talk UI state by (de)activating server VAD on the
-    // backend. The Realtime SDK supports live session updates via the
-    // `session.update` event.
-    const turnDetection = isPTTActive
-      ? null
-      : {
-          type: 'server_vad',
-          threshold: 0.9,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
-          create_response: true,
-        };
+    // Keep server VAD enabled by default for a clean UI.
+    const turnDetection = {
+      type: "server_vad",
+      threshold: 0.9,
+      prefix_padding_ms: 300,
+      silence_duration_ms: 500,
+      create_response: true,
+    };
 
     sendEvent({
-      type: 'session.update',
+      type: "session.update",
       session: {
         turn_detection: turnDetection,
       },
@@ -279,101 +674,23 @@ function App() {
 
     // Send an initial 'hi' message to trigger the agent to greet the user
     if (shouldTriggerResponse) {
-      sendSimulatedUserMessage('hi');
+      sendSimulatedUserMessage("hi");
     }
     return;
-  }
+  };
 
-  const handleSendTextMessage = () => {
-    if (!userText.trim()) return;
+  const handleSubmit = () => {
+    if (!prompt.trim() || sessionStatus !== "CONNECTED") return;
     interrupt();
 
     try {
-      sendUserText(userText.trim());
+      sendUserText(prompt.trim());
     } catch (err) {
-      console.error('Failed to send via SDK', err);
+      console.error("Failed to send via SDK", err);
     }
 
-    setUserText("");
+    setPrompt("");
   };
-
-  const handleTalkButtonDown = () => {
-    if (sessionStatus !== 'CONNECTED') return;
-    interrupt();
-
-    setIsPTTUserSpeaking(true);
-    sendClientEvent({ type: 'input_audio_buffer.clear' }, 'clear PTT buffer');
-
-    // No placeholder; we'll rely on server transcript once ready.
-  };
-
-  const handleTalkButtonUp = () => {
-    if (sessionStatus !== 'CONNECTED' || !isPTTUserSpeaking)
-      return;
-
-    setIsPTTUserSpeaking(false);
-    sendClientEvent({ type: 'input_audio_buffer.commit' }, 'commit PTT');
-    sendClientEvent({ type: 'response.create' }, 'trigger response PTT');
-  };
-
-  const onToggleConnection = () => {
-    if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
-      disconnectFromRealtime();
-      setSessionStatus("DISCONNECTED");
-    } else {
-      connectToRealtime();
-    }
-  };
-
-  const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newAgentConfig = e.target.value;
-    const url = new URL(window.location.toString());
-    url.searchParams.set("agentConfig", newAgentConfig);
-    window.location.replace(url.toString());
-  };
-
-  const handleSelectedAgentChange = (
-    e: React.ChangeEvent<HTMLSelectElement>
-  ) => {
-    const newAgentName = e.target.value;
-    // Reconnect session with the newly selected agent as root so that tool
-    // execution works correctly.
-    disconnectFromRealtime();
-    setSelectedAgentName(newAgentName);
-    // connectToRealtime will be triggered by effect watching selectedAgentName
-  };
-
-  // Because we need a new connection, refresh the page when codec changes
-  const handleCodecChange = (newCodec: string) => {
-    const url = new URL(window.location.toString());
-    url.searchParams.set("codec", newCodec);
-    window.location.replace(url.toString());
-  };
-
-  useEffect(() => {
-    const storedPushToTalkUI = localStorage.getItem("pushToTalkUI");
-    if (storedPushToTalkUI) {
-      setIsPTTActive(storedPushToTalkUI === "true");
-    }
-    const storedLogsExpanded = localStorage.getItem("logsExpanded");
-    if (storedLogsExpanded) {
-      setIsEventsPaneExpanded(storedLogsExpanded === "true");
-    }
-    const storedAudioPlaybackEnabled = localStorage.getItem(
-      "audioPlaybackEnabled"
-    );
-    if (storedAudioPlaybackEnabled) {
-      setIsAudioPlaybackEnabled(storedAudioPlaybackEnabled === "true");
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("pushToTalkUI", isPTTActive.toString());
-  }, [isPTTActive]);
-
-  useEffect(() => {
-    localStorage.setItem("logsExpanded", isEventsPaneExpanded.toString());
-  }, [isEventsPaneExpanded]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -397,154 +714,51 @@ function App() {
     }
 
     // Toggle server-side audio stream mute so bandwidth is saved when the
-    // user disables playback. 
+    // user disables playback.
     try {
       mute(!isAudioPlaybackEnabled);
     } catch (err) {
-      console.warn('Failed to toggle SDK mute', err);
+      console.warn("Failed to toggle SDK mute", err);
     }
   }, [isAudioPlaybackEnabled]);
 
   // Ensure mute state is propagated to transport right after we connect or
   // whenever the SDK client reference becomes available.
   useEffect(() => {
-    if (sessionStatus === 'CONNECTED') {
+    if (sessionStatus === "CONNECTED") {
       try {
         mute(!isAudioPlaybackEnabled);
       } catch (err) {
-        console.warn('mute sync after connect failed', err);
+        console.warn("mute sync after connect failed", err);
       }
     }
   }, [sessionStatus, isAudioPlaybackEnabled]);
 
-  useEffect(() => {
-    if (sessionStatus === "CONNECTED" && audioElementRef.current?.srcObject) {
-      // The remote audio stream from the audio element.
-      const remoteStream = audioElementRef.current.srcObject as MediaStream;
-      startRecording(remoteStream);
-    }
+  const chatMessages = useMemo<ChatMessage[]>(() => {
+    return [...transcriptItems]
+      .filter((item) => item.type === "MESSAGE" && !item.isHidden)
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .map((item) => ({
+        id: item.itemId,
+        role: item.role ?? "assistant",
+        content: item.title ?? "",
+      }));
+  }, [transcriptItems]);
 
-    // Clean up on unmount or when sessionStatus is updated.
-    return () => {
-      stopRecording();
-    };
-  }, [sessionStatus]);
-
-  const agentSetKey = searchParams.get("agentConfig") || "default";
+  const isReady = sessionStatus === "CONNECTED";
+  const isLoading = sessionStatus === "CONNECTING";
 
   return (
-    <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
-      <div className="p-5 text-lg font-semibold flex justify-between items-center">
-        <div
-          className="flex items-center cursor-pointer"
-          onClick={() => window.location.reload()}
-        >
-          <div>
-            <Image
-              src="/openai-logomark.svg"
-              alt="OpenAI Logo"
-              width={20}
-              height={20}
-              className="mr-2"
-            />
-          </div>
-          <div>
-            Realtime API <span className="text-gray-500">Agents</span>
-          </div>
-        </div>
-        <div className="flex items-center">
-          <label className="flex items-center text-base gap-1 mr-2 font-medium">
-            Scenario
-          </label>
-          <div className="relative inline-block">
-            <select
-              value={agentSetKey}
-              onChange={handleAgentChange}
-              className="appearance-none border border-gray-300 rounded-lg text-base px-2 py-1 pr-8 cursor-pointer font-normal focus:outline-none"
-            >
-              {Object.keys(allAgentSets).map((agentKey) => (
-                <option key={agentKey} value={agentKey}>
-                  {agentKey}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-600">
-              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M5.23 7.21a.75.75 0 011.06.02L10 10.44l3.71-3.21a.75.75 0 111.04 1.08l-4.25 3.65a.75.75 0 01-1.04 0L5.21 8.27a.75.75 0 01.02-1.06z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </div>
-          </div>
-
-          {agentSetKey && (
-            <div className="flex items-center ml-6">
-              <label className="flex items-center text-base gap-1 mr-2 font-medium">
-                Agent
-              </label>
-              <div className="relative inline-block">
-                <select
-                  value={selectedAgentName}
-                  onChange={handleSelectedAgentChange}
-                  className="appearance-none border border-gray-300 rounded-lg text-base px-2 py-1 pr-8 cursor-pointer font-normal focus:outline-none"
-                >
-                  {selectedAgentConfigSet?.map((agent) => (
-                    <option key={agent.name} value={agent.name}>
-                      {agent.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-600">
-                  <svg
-                    className="h-4 w-4"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M5.23 7.21a.75.75 0 011.06.02L10 10.44l3.71-3.21a.75.75 0 111.04 1.08l-4.25 3.65a.75.75 0 01-1.04 0L5.21 8.27a.75.75 0 01.02-1.06z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-1 gap-2 px-2 overflow-hidden relative">
-        <Transcript
-          userText={userText}
-          setUserText={setUserText}
-          onSendMessage={handleSendTextMessage}
-          downloadRecording={downloadRecording}
-          canSend={
-            sessionStatus === "CONNECTED"
-          }
-        />
-
-        <Events isExpanded={isEventsPaneExpanded} />
-      </div>
-
-      <BottomToolbar
-        sessionStatus={sessionStatus}
-        onToggleConnection={onToggleConnection}
-        isPTTActive={isPTTActive}
-        setIsPTTActive={setIsPTTActive}
-        isPTTUserSpeaking={isPTTUserSpeaking}
-        handleTalkButtonDown={handleTalkButtonDown}
-        handleTalkButtonUp={handleTalkButtonUp}
-        isEventsPaneExpanded={isEventsPaneExpanded}
-        setIsEventsPaneExpanded={setIsEventsPaneExpanded}
-        isAudioPlaybackEnabled={isAudioPlaybackEnabled}
-        setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
-        codec={urlCodec}
-        onCodecChange={handleCodecChange}
-      />
-    </div>
+    <FullChatApp
+      isAudioPlaybackEnabled={isAudioPlaybackEnabled}
+      setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
+      prompt={prompt}
+      setPrompt={setPrompt}
+      isLoading={isLoading}
+      isReady={isReady}
+      chatMessages={chatMessages}
+      onSubmit={handleSubmit}
+    />
   );
 }
 
