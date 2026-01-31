@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   RealtimeSession,
   RealtimeAgent,
@@ -13,6 +13,8 @@ import { SessionStatus } from '../types';
 export interface RealtimeSessionCallbacks {
   onConnectionChange?: (status: SessionStatus) => void;
   onAgentHandoff?: (agentName: string) => void;
+  onTransportEvent?: (event: any) => void;
+  onOutputAudioStream?: (stream: MediaStream) => void;
 }
 
 export interface ConnectOptions {
@@ -44,22 +46,24 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
   const historyHandlers = useHandleSessionHistory().current;
 
   function handleTransportEvent(event: any) {
+    const transportEvent = event?.event ?? event;
+    callbacks.onTransportEvent?.(transportEvent);
     // Handle additional server events that aren't managed by the session
-    switch (event.type) {
+    switch (transportEvent.type) {
       case "conversation.item.input_audio_transcription.completed": {
-        historyHandlers.handleTranscriptionCompleted(event);
+        historyHandlers.handleTranscriptionCompleted(transportEvent);
         break;
       }
       case "response.audio_transcript.done": {
-        historyHandlers.handleTranscriptionCompleted(event);
+        historyHandlers.handleTranscriptionCompleted(transportEvent);
         break;
       }
       case "response.audio_transcript.delta": {
-        historyHandlers.handleTranscriptionDelta(event);
+        historyHandlers.handleTranscriptionDelta(transportEvent);
         break;
       }
       default: {
-        logServerEvent(event);
+        logServerEvent(transportEvent);
         break;
       } 
     }
@@ -87,10 +91,10 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
     callbacks.onAgentHandoff?.(agentName);
   };
 
-  useEffect(() => {
-    if (sessionRef.current) {
+  const attachSessionListeners = useCallback(
+    (session: RealtimeSession) => {
       // Log server errors
-      sessionRef.current.on("error", (...args: any[]) => {
+      session.on("error", (...args: any[]) => {
         logServerEvent({
           type: "error",
           message: args[0],
@@ -98,17 +102,18 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       });
 
       // history events
-      sessionRef.current.on("agent_handoff", handleAgentHandoff);
-      sessionRef.current.on("agent_tool_start", historyHandlers.handleAgentToolStart);
-      sessionRef.current.on("agent_tool_end", historyHandlers.handleAgentToolEnd);
-      sessionRef.current.on("history_updated", historyHandlers.handleHistoryUpdated);
-      sessionRef.current.on("history_added", historyHandlers.handleHistoryAdded);
-      sessionRef.current.on("guardrail_tripped", historyHandlers.handleGuardrailTripped);
+      session.on("agent_handoff", handleAgentHandoff);
+      session.on("agent_tool_start", historyHandlers.handleAgentToolStart);
+      session.on("agent_tool_end", historyHandlers.handleAgentToolEnd);
+      session.on("history_updated", historyHandlers.handleHistoryUpdated);
+      session.on("history_added", historyHandlers.handleHistoryAdded);
+      session.on("guardrail_tripped", historyHandlers.handleGuardrailTripped);
 
       // additional transport events
-      sessionRef.current.on("transport_event", handleTransportEvent);
-    }
-  }, [sessionRef.current]);
+      session.on("transport_event", handleTransportEvent);
+    },
+    [handleAgentHandoff, handleTransportEvent, historyHandlers, logServerEvent],
+  );
 
   const connect = useCallback(
     async ({
@@ -131,6 +136,12 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
           // Set preferred codec before offer creation
           changePeerConnection: async (pc: RTCPeerConnection) => {
             applyCodec(pc);
+            pc.addEventListener("track", (event) => {
+              if (event.track.kind !== "audio") return;
+              const stream =
+                event.streams?.[0] ?? new MediaStream([event.track]);
+              callbacks.onOutputAudioStream?.(stream);
+            });
             return pc;
           },
         }),
@@ -144,10 +155,11 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
         context: extraContext ?? {},
       });
 
+      attachSessionListeners(sessionRef.current);
       await sessionRef.current.connect({ apiKey: ek });
       updateStatus('CONNECTED');
     },
-    [callbacks, updateStatus],
+    [attachSessionListeners, callbacks, updateStatus],
   );
 
   const disconnect = useCallback(() => {

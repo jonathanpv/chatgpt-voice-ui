@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 
 import {
@@ -36,7 +36,10 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { ToolModal } from "@/components/ui/tool-modal";
 import { cn } from "@/lib/utils";
+import { OrbVisualization, type OrbState } from "@/app/components/OrbVisualization";
+import { useOrbAudioMetrics } from "@/app/hooks/useOrbAudioMetrics";
 import {
   ArrowUp,
   Copy,
@@ -51,6 +54,12 @@ import {
   ThumbsUp,
   Trash,
 } from "lucide-react";
+import {
+  addTodoItem,
+  getTodoItems,
+  toggleTodoItem,
+  type TodoItem,
+} from "@/app/lib/todoStore";
 
 // Types
 import { SessionStatus } from "@/app/types";
@@ -161,11 +170,13 @@ const conversationHistory = [
 type ChatSidebarProps = {
   isAudioPlaybackEnabled: boolean;
   setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  isOrbMode: boolean;
 };
 
 function ChatSidebar({
   isAudioPlaybackEnabled,
   setIsAudioPlaybackEnabled,
+  isOrbMode,
 }: ChatSidebarProps) {
   return (
     <Sidebar>
@@ -236,6 +247,34 @@ type ChatMessage = {
   content: string;
 };
 
+type BibleExcerptPayload = {
+  reference: string;
+  translation?: string;
+  text: string;
+};
+
+type SemanticResult = {
+  id: string;
+  reference: string;
+  summary: string;
+  relevance: number;
+};
+
+type SemanticSearchPayload = {
+  query: string;
+  results: SemanticResult[];
+};
+
+type TodoPayload = {
+  items: TodoItem[];
+  error?: string;
+};
+
+type ToolModalState =
+  | { type: "bible"; payload: BibleExcerptPayload }
+  | { type: "search"; payload: SemanticSearchPayload }
+  | { type: "todo"; payload: TodoPayload };
+
 type ChatContentProps = {
   prompt: string;
   setPrompt: (value: string) => void;
@@ -245,6 +284,9 @@ type ChatContentProps = {
   onToggleVoice: () => void;
   chatMessages: ChatMessage[];
   onSubmit: () => void;
+  isOrbMode: boolean;
+  onToggleOrbMode: () => void;
+  orbLayer: React.ReactNode;
 };
 
 function ChatContent({
@@ -256,6 +298,9 @@ function ChatContent({
   onToggleVoice,
   chatMessages,
   onSubmit,
+  isOrbMode,
+  onToggleOrbMode,
+  orbLayer,
 }: ChatContentProps) {
   const isPromptDisabled = isVoiceEnabled && !isReady;
 
@@ -264,10 +309,41 @@ function ChatContent({
       <header className="bg-background z-10 flex h-16 w-full shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
         <div className="text-foreground">Chat Supervisor</div>
+        <div className="ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full"
+            onClick={onToggleOrbMode}
+          >
+            {isOrbMode ? "Show chat" : "Orb mode"}
+          </Button>
+        </div>
       </header>
 
-      <div className="relative flex-1 overflow-y-auto">
-        <ChatContainerRoot className="h-full">
+      <div
+        className={cn(
+          "relative flex-1",
+          isOrbMode ? "overflow-hidden" : "overflow-y-auto"
+        )}
+      >
+        <div
+          className={cn(
+            "absolute inset-0 z-0 flex items-center justify-center transition-opacity duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            isOrbMode ? "opacity-100" : "pointer-events-none opacity-0"
+          )}
+        >
+          {orbLayer}
+        </div>
+        <ChatContainerRoot
+          className={cn(
+            "relative z-10 h-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            isOrbMode
+              ? "pointer-events-none scale-[0.98] opacity-0 blur-[1px]"
+              : "opacity-100"
+          )}
+          aria-hidden={isOrbMode}
+        >
           <ChatContainerContent className="space-y-0 px-5 py-12">
             {chatMessages.map((message, index) => {
               const isAssistant = message.role === "assistant";
@@ -368,7 +444,12 @@ function ChatContent({
               );
             })}
           </ChatContainerContent>
-          <div className="absolute bottom-4 left-1/2 flex w-full max-w-3xl -translate-x-1/2 justify-end px-5">
+          <div
+            className={cn(
+              "absolute bottom-4 left-1/2 flex w-full max-w-3xl -translate-x-1/2 justify-end px-5 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+              isOrbMode ? "pointer-events-none opacity-0" : "opacity-100"
+            )}
+          >
             <ScrollButton className="shadow-sm" />
           </div>
         </ChatContainerRoot>
@@ -479,6 +560,9 @@ function FullChatApp({
   isReady,
   chatMessages,
   onSubmit,
+  isOrbMode,
+  onToggleOrbMode,
+  orbLayer,
 }: {
   isAudioPlaybackEnabled: boolean;
   setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
@@ -490,12 +574,16 @@ function FullChatApp({
   isReady: boolean;
   chatMessages: ChatMessage[];
   onSubmit: () => void;
+  isOrbMode: boolean;
+  onToggleOrbMode: () => void;
+  orbLayer: React.ReactNode;
 }) {
   return (
     <SidebarProvider>
       <ChatSidebar
         isAudioPlaybackEnabled={isAudioPlaybackEnabled}
         setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
+        isOrbMode={isOrbMode}
       />
       <SidebarInset>
         <ChatContent
@@ -507,6 +595,9 @@ function FullChatApp({
           onToggleVoice={onToggleVoice}
           chatMessages={chatMessages}
           onSubmit={onSubmit}
+          isOrbMode={isOrbMode}
+          onToggleOrbMode={onToggleOrbMode}
+          orbLayer={orbLayer}
         />
       </SidebarInset>
     </SidebarProvider>
@@ -515,6 +606,7 @@ function FullChatApp({
 
 function App() {
   const searchParams = useSearchParams()!;
+  const router = useRouter();
 
   const {
     addTranscriptMessage,
@@ -527,8 +619,19 @@ function App() {
   const [selectedAgentConfigSet, setSelectedAgentConfigSet] = useState<
     RealtimeAgent[] | null
   >(null);
+  const [toolModal, setToolModal] = useState<ToolModalState | null>(null);
+  const [lastToolBreadcrumbId, setLastToolBreadcrumbId] = useState<
+    string | null
+  >(null);
+  const [todoInput, setTodoInput] = useState("");
 
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
+    null
+  );
+  const [orbOutputStream, setOrbOutputStream] = useState<MediaStream | null>(
+    null
+  );
   // Ref to identify whether the latest agent switch came from an automatic handoff
   const handoffTriggeredRef = useRef(false);
 
@@ -545,23 +648,9 @@ function App() {
   useEffect(() => {
     if (sdkAudioElement && !audioElementRef.current) {
       audioElementRef.current = sdkAudioElement;
+      setAudioElement(sdkAudioElement);
     }
   }, [sdkAudioElement]);
-
-  const {
-    connect,
-    disconnect,
-    sendUserText,
-    sendEvent,
-    interrupt,
-    mute,
-  } = useRealtimeSession({
-    onConnectionChange: (s) => setSessionStatus(s as SessionStatus),
-    onAgentHandoff: (agentName: string) => {
-      handoffTriggeredRef.current = true;
-      setSelectedAgentName(agentName);
-    },
-  });
 
   const [sessionStatus, setSessionStatus] =
     useState<SessionStatus>("DISCONNECTED");
@@ -577,6 +666,147 @@ function App() {
     if (typeof window === "undefined") return false;
     const stored = localStorage.getItem("voiceEnabled");
     return stored ? stored === "true" : false;
+  });
+
+  const isOrbMode = searchParams.get("mode") === "orb";
+
+  const [orbState, setOrbState] = useState<OrbState>("idle");
+  const [orbStateStartTime, setOrbStateStartTime] = useState<number>(() => {
+    if (typeof performance === "undefined") return 0;
+    return performance.now();
+  });
+  const [orbIsListening, setOrbIsListening] = useState(false);
+  const [orbAudioSource, setOrbAudioSource] = useState<
+    "mic" | "output" | "idle"
+  >("idle");
+  const orbFlagsRef = useRef({
+    userSpeaking: false,
+    assistantThinking: false,
+    assistantSpeaking: false,
+  });
+
+  const setOrbStateWithTime = useCallback((next: OrbState) => {
+    setOrbState((prev) => {
+      if (prev !== next && typeof performance !== "undefined") {
+        setOrbStateStartTime(performance.now());
+      }
+      return next;
+    });
+  }, []);
+
+  const updateOrbDerivedState = useCallback(() => {
+    if (!isVoiceEnabled || sessionStatus !== "CONNECTED") {
+      setOrbStateWithTime(isOrbMode ? "listen" : "idle");
+      setOrbAudioSource("idle");
+      setOrbIsListening(isOrbMode);
+      return;
+    }
+
+    const { userSpeaking, assistantThinking, assistantSpeaking } =
+      orbFlagsRef.current;
+
+    if (assistantSpeaking) {
+      setOrbStateWithTime("speak");
+      setOrbAudioSource("output");
+      setOrbIsListening(false);
+      return;
+    }
+
+    if (assistantThinking) {
+      setOrbStateWithTime("think");
+      setOrbAudioSource("idle");
+      setOrbIsListening(!userSpeaking);
+      return;
+    }
+
+    setOrbStateWithTime("listen");
+    setOrbAudioSource(userSpeaking ? "mic" : "idle");
+    setOrbIsListening(!assistantSpeaking && !userSpeaking);
+  }, [isOrbMode, isVoiceEnabled, sessionStatus, setOrbStateWithTime]);
+
+  const handleTransportEvent = useCallback(
+    (event: any) => {
+      const transportEvent = event?.event ?? event;
+      switch (transportEvent.type) {
+        case "input_audio_buffer.speech_started":
+          orbFlagsRef.current.userSpeaking = true;
+          break;
+        case "input_audio_buffer.speech_stopped":
+          orbFlagsRef.current.userSpeaking = false;
+          break;
+        case "response.created":
+          orbFlagsRef.current.assistantThinking = true;
+          break;
+        case "output_audio_buffer.started":
+        case "response.audio.delta":
+          orbFlagsRef.current.assistantSpeaking = true;
+          orbFlagsRef.current.assistantThinking = false;
+          break;
+        case "output_audio_buffer.stopped":
+        case "output_audio_buffer.cleared":
+        case "response.audio.done":
+          orbFlagsRef.current.assistantSpeaking = false;
+          break;
+        case "response.done":
+        case "response.cancelled":
+          orbFlagsRef.current.assistantThinking = false;
+          orbFlagsRef.current.assistantSpeaking = false;
+          break;
+        case "error":
+          orbFlagsRef.current.assistantThinking = false;
+          orbFlagsRef.current.assistantSpeaking = false;
+          orbFlagsRef.current.userSpeaking = false;
+          break;
+        default:
+          break;
+      }
+
+      updateOrbDerivedState();
+    },
+    [updateOrbDerivedState]
+  );
+
+  useEffect(() => {
+    updateOrbDerivedState();
+  }, [updateOrbDerivedState]);
+
+  const orbAudioMetricsRef = useOrbAudioMetrics({
+    isActive: isOrbMode,
+    sourceMode: orbAudioSource,
+    audioElement,
+    outputStream: orbOutputStream,
+    enableMic: isVoiceEnabled,
+  });
+
+  const handleToggleOrbMode = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (isOrbMode) {
+      url.searchParams.delete("mode");
+    } else {
+      url.searchParams.set("mode", "orb");
+    }
+    const next = `${url.pathname}${url.search}`;
+    router.replace(next);
+  }, [isOrbMode, router]);
+
+  const {
+    connect,
+    disconnect,
+    sendUserText,
+    sendEvent,
+    interrupt,
+    mute,
+  } = useRealtimeSession({
+    onConnectionChange: (s) => setSessionStatus(s as SessionStatus),
+    onAgentHandoff: (agentName: string) => {
+      handoffTriggeredRef.current = true;
+      setSelectedAgentName(agentName);
+    },
+    onTransportEvent: handleTransportEvent,
+    onOutputAudioStream: (stream: MediaStream) => {
+      setOrbOutputStream((prev) => (prev?.id === stream.id ? prev : stream));
+    },
   });
 
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
@@ -618,6 +848,12 @@ function App() {
       disconnect();
     }
   }, [isVoiceEnabled, sessionStatus, disconnect]);
+
+  useEffect(() => {
+    if (sessionStatus === "DISCONNECTED") {
+      setOrbOutputStream(null);
+    }
+  }, [sessionStatus]);
 
   useEffect(() => {
     if (
@@ -711,8 +947,8 @@ function App() {
     // Keep server VAD enabled by default for a clean UI.
     const turnDetection = {
       type: "server_vad",
-      threshold: 0.9,
-      prefix_padding_ms: 300,
+      threshold: 0.3,
+      prefix_padding_ms: 200,
       silence_duration_ms: 500,
       create_response: true,
     };
@@ -789,6 +1025,52 @@ function App() {
     }
   }, [sessionStatus, isAudioPlaybackEnabled]);
 
+  useEffect(() => {
+    const breadcrumbs = [...transcriptItems]
+      .filter((item) => item.type === "BREADCRUMB" && item.title)
+      .sort((a, b) => a.createdAtMs - b.createdAtMs);
+
+    const latest = breadcrumbs[breadcrumbs.length - 1];
+    if (!latest || latest.itemId === lastToolBreadcrumbId) return;
+
+    const title = latest.title ?? "";
+    const match = title.match(/function call result: (.+)$/);
+    const toolName = match?.[1]?.trim();
+
+    if (!toolName) return;
+
+    const payload = latest.data ?? {};
+    switch (toolName) {
+      case "getBibleExcerpt": {
+        setToolModal({ type: "bible", payload: payload as BibleExcerptPayload });
+        break;
+      }
+      case "searchBibleSemantic": {
+        setToolModal({
+          type: "search",
+          payload: payload as SemanticSearchPayload,
+        });
+        break;
+      }
+      case "getTodoList":
+      case "addTodoItem":
+      case "completeTodoItem": {
+        const items = Array.isArray((payload as TodoPayload).items)
+          ? (payload as TodoPayload).items
+          : getTodoItems();
+        setToolModal({
+          type: "todo",
+          payload: { ...(payload as TodoPayload), items },
+        });
+        break;
+      }
+      default:
+        break;
+    }
+
+    setLastToolBreadcrumbId(latest.itemId);
+  }, [transcriptItems, lastToolBreadcrumbId]);
+
   const chatMessages = useMemo<ChatMessage[]>(() => {
     return [...transcriptItems]
       .filter((item) => item.type === "MESSAGE" && !item.isHidden)
@@ -803,19 +1085,149 @@ function App() {
   const isReady = sessionStatus === "CONNECTED";
   const isLoading = sessionStatus === "CONNECTING";
 
+  const handleModalClose = () => {
+    setToolModal(null);
+    setTodoInput("");
+  };
+
+  const handleTodoSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const text = todoInput.trim();
+    if (!text) return;
+    const items = addTodoItem(text);
+    setTodoInput("");
+    setToolModal({ type: "todo", payload: { items } });
+  };
+
+  const handleTodoToggle = (id: string) => {
+    const items = toggleTodoItem(id);
+    setToolModal({ type: "todo", payload: { items } });
+  };
+
   return (
-    <FullChatApp
-      isAudioPlaybackEnabled={isAudioPlaybackEnabled}
-      setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
-      isVoiceEnabled={isVoiceEnabled}
-      onToggleVoice={() => setIsVoiceEnabled((prev) => !prev)}
-      prompt={prompt}
-      setPrompt={setPrompt}
-      isLoading={isLoading}
-      isReady={isReady}
-      chatMessages={chatMessages}
-      onSubmit={handleSubmit}
-    />
+    <>
+      <FullChatApp
+        isAudioPlaybackEnabled={isAudioPlaybackEnabled}
+        setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
+        isVoiceEnabled={isVoiceEnabled}
+        onToggleVoice={() => setIsVoiceEnabled((prev) => !prev)}
+        prompt={prompt}
+        setPrompt={setPrompt}
+        isLoading={isLoading}
+        isReady={isReady}
+        chatMessages={chatMessages}
+        onSubmit={handleSubmit}
+        isOrbMode={isOrbMode}
+        onToggleOrbMode={handleToggleOrbMode}
+        orbLayer={
+          <OrbVisualization
+            audioMetricsRef={orbAudioMetricsRef}
+            orbState={orbState}
+            stateStartTimeMs={orbStateStartTime}
+            isListening={orbIsListening}
+            isActive={isOrbMode}
+            size={320}
+            className="h-full w-full"
+          />
+        }
+      />
+      <ToolModal
+        open={Boolean(toolModal)}
+        title={
+          toolModal?.type === "bible"
+            ? "Bible Excerpt"
+            : toolModal?.type === "search"
+              ? "Related Passages"
+              : "Todo List"
+        }
+        onClose={handleModalClose}
+      >
+        {toolModal?.type === "bible" && (
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              {toolModal.payload.reference}
+              {toolModal.payload.translation
+                ? ` · ${toolModal.payload.translation}`
+                : ""}
+            </div>
+            <p className="text-base text-foreground">
+              {toolModal.payload.text}
+            </p>
+          </div>
+        )}
+        {toolModal?.type === "search" && (
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Query: {toolModal.payload.query}
+            </div>
+            <div className="space-y-2">
+              {toolModal.payload.results.map((result) => (
+                <div
+                  key={result.id}
+                  className="rounded-lg border border-border p-3"
+                >
+                  <div className="text-sm font-medium text-foreground">
+                    {result.reference}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {result.summary}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {toolModal?.type === "todo" && (
+          <div className="space-y-4">
+            {toolModal.payload.error && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {toolModal.payload.error}
+              </div>
+            )}
+            <form className="flex gap-2" onSubmit={handleTodoSubmit}>
+              <input
+                value={todoInput}
+                onChange={(event) => setTodoInput(event.target.value)}
+                placeholder="Add a new task"
+                className="border-input bg-background text-foreground placeholder:text-muted-foreground flex-1 rounded-md border px-3 py-2 text-sm"
+              />
+              <Button type="submit" size="sm">
+                Add
+              </Button>
+            </form>
+            <div className="space-y-2">
+              {toolModal.payload.items.length === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  No tasks yet. Add one above.
+                </div>
+              ) : (
+                toolModal.payload.items.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex items-center gap-3 rounded-lg border border-border px-3 py-2"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.completed}
+                      onChange={() => handleTodoToggle(item.id)}
+                      className="accent-foreground"
+                    />
+                    <span
+                      className={cn(
+                        "text-sm text-foreground",
+                        item.completed && "text-muted-foreground line-through"
+                      )}
+                    >
+                      {item.text}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </ToolModal>
+    </>
   );
 }
 
