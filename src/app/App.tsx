@@ -40,6 +40,7 @@ import { ToolModal } from "@/components/ui/tool-modal";
 import { cn } from "@/lib/utils";
 import { OrbVisualization, type OrbState } from "@/app/components/OrbVisualization";
 import { useOrbAudioMetrics } from "@/app/hooks/useOrbAudioMetrics";
+import { useOrbMachine } from "@/app/hooks/useOrbMachine";
 import {
   ArrowUp,
   Copy,
@@ -670,105 +671,66 @@ function App() {
 
   const isOrbMode = searchParams.get("mode") === "orb";
 
-  const [orbState, setOrbState] = useState<OrbState>("idle");
   const [orbStateStartTime, setOrbStateStartTime] = useState<number>(() => {
     if (typeof performance === "undefined") return 0;
     return performance.now();
   });
-  const [orbIsListening, setOrbIsListening] = useState(false);
-  const [orbAudioSource, setOrbAudioSource] = useState<
-    "mic" | "output" | "idle"
-  >("idle");
-  const orbFlagsRef = useRef({
-    userSpeaking: false,
-    assistantThinking: false,
-    assistantSpeaking: false,
+  const {
+    orbState,
+    orbAudioSource,
+    orbIsListening,
+    sendOrbEvent,
+  } = useOrbMachine({
+    isOrbMode,
+    isVoiceEnabled,
+    sessionStatus,
   });
+  const lastOrbStateRef = useRef<OrbState>(orbState);
 
-  const setOrbStateWithTime = useCallback((next: OrbState) => {
-    setOrbState((prev) => {
-      if (prev !== next && typeof performance !== "undefined") {
+  useEffect(() => {
+    if (orbState !== lastOrbStateRef.current) {
+      lastOrbStateRef.current = orbState;
+      if (typeof performance !== "undefined") {
         setOrbStateStartTime(performance.now());
       }
-      return next;
-    });
-  }, []);
-
-  const updateOrbDerivedState = useCallback(() => {
-    if (!isVoiceEnabled || sessionStatus !== "CONNECTED") {
-      setOrbStateWithTime(isOrbMode ? "listen" : "idle");
-      setOrbAudioSource("idle");
-      setOrbIsListening(isOrbMode);
-      return;
     }
-
-    const { userSpeaking, assistantThinking, assistantSpeaking } =
-      orbFlagsRef.current;
-
-    if (assistantSpeaking) {
-      setOrbStateWithTime("speak");
-      setOrbAudioSource("output");
-      setOrbIsListening(false);
-      return;
-    }
-
-    if (assistantThinking) {
-      setOrbStateWithTime("think");
-      setOrbAudioSource("idle");
-      setOrbIsListening(!userSpeaking);
-      return;
-    }
-
-    setOrbStateWithTime("listen");
-    setOrbAudioSource(userSpeaking ? "mic" : "idle");
-    setOrbIsListening(!assistantSpeaking && !userSpeaking);
-  }, [isOrbMode, isVoiceEnabled, sessionStatus, setOrbStateWithTime]);
+  }, [orbState]);
 
   const handleTransportEvent = useCallback(
     (event: any) => {
       const transportEvent = event?.event ?? event;
       switch (transportEvent.type) {
         case "input_audio_buffer.speech_started":
-          orbFlagsRef.current.userSpeaking = true;
+          sendOrbEvent({ type: "USER_SPEECH_START" });
           break;
         case "input_audio_buffer.speech_stopped":
-          orbFlagsRef.current.userSpeaking = false;
+          sendOrbEvent({ type: "USER_SPEECH_STOP" });
           break;
         case "response.created":
-          orbFlagsRef.current.assistantThinking = true;
+          sendOrbEvent({ type: "ASSISTANT_THINKING_START" });
           break;
         case "output_audio_buffer.started":
         case "response.audio.delta":
-          orbFlagsRef.current.assistantSpeaking = true;
-          orbFlagsRef.current.assistantThinking = false;
+          sendOrbEvent({ type: "ASSISTANT_SPEAKING_START" });
           break;
         case "output_audio_buffer.stopped":
         case "output_audio_buffer.cleared":
         case "response.audio.done":
-          orbFlagsRef.current.assistantSpeaking = false;
+          sendOrbEvent({ type: "ASSISTANT_SPEAKING_STOP" });
           break;
         case "response.done":
         case "response.cancelled":
-          orbFlagsRef.current.assistantThinking = false;
-          orbFlagsRef.current.assistantSpeaking = false;
+          sendOrbEvent({ type: "ASSISTANT_IDLE" });
           break;
         case "error":
-          orbFlagsRef.current.assistantThinking = false;
-          orbFlagsRef.current.assistantSpeaking = false;
-          orbFlagsRef.current.userSpeaking = false;
+          sendOrbEvent({ type: "RESET_ALL" });
           break;
         default:
           break;
       }
-
-      updateOrbDerivedState();
     },
-    [updateOrbDerivedState]
+    [sendOrbEvent]
   );
-
-  useEffect(() => {
-    updateOrbDerivedState();
-  }, [updateOrbDerivedState]);
 
   const orbAudioMetricsRef = useOrbAudioMetrics({
     isActive: isOrbMode,

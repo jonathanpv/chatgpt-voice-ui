@@ -488,6 +488,8 @@ export function OrbVisualization({
   const programRef = useRef<WebGLProgram | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const noiseTextureRef = useRef<WebGLTexture | null>(null);
+  const noiseReadyTimeRef = useRef<number | null>(null);
+  const [isVisualReady, setIsVisualReady] = useState(false);
   const stateRef = useRef<OrbState>(orbState);
   const stateStartTimeRef = useRef<number>(stateStartTimeMs);
   const listeningRef = useRef(isListening);
@@ -570,6 +572,10 @@ export function OrbVisualization({
     loadNoiseTexture(gl)
       .then((texture) => {
         noiseTextureRef.current = texture;
+        if (noiseReadyTimeRef.current === null) {
+          noiseReadyTimeRef.current = performance.now();
+          setIsVisualReady(true);
+        }
       })
       .catch(() => {
         noiseTextureRef.current = null;
@@ -637,7 +643,11 @@ export function OrbVisualization({
 
     const render = () => {
       const now = performance.now();
-      const stateTime = Math.max(0, (now - stateStartTimeRef.current) / 1000);
+      const effectiveStart =
+        noiseReadyTimeRef.current ?? stateStartTimeRef.current;
+      const stateTime = noiseReadyTimeRef.current
+        ? Math.max(0, (now - Math.max(stateStartTimeRef.current, effectiveStart)) / 1000)
+        : 0;
 
       const PHASE_INCREMENT = 0.016;
       const targetSpeed = listeningRef.current ? 0.65 : 1.5;
@@ -672,6 +682,11 @@ export function OrbVisualization({
       }
       gl.viewport(0, 0, width, height);
       gl.clear(gl.COLOR_BUFFER_BIT);
+
+      if (!noiseReadyTimeRef.current) {
+        animationFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
 
       const audio = audioMetricsRef.current;
       const micLevel =
@@ -717,7 +732,14 @@ export function OrbVisualization({
   return (
     <div className={cn("flex h-full w-full items-center justify-center", className)}>
       {isSupported ? (
-        <canvas ref={canvasRef} className="rounded-xl" />
+        <canvas
+          ref={canvasRef}
+          className="rounded-xl"
+          style={{
+            opacity: isVisualReady ? 1 : 0,
+            transition: "opacity 240ms ease-out",
+          }}
+        />
       ) : (
         <div className="text-sm text-muted-foreground">
           WebGL2 is not supported in this browser.
