@@ -38,58 +38,55 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       callbacks.onConnectionChange?.(s);
       logClientEvent({}, s);
     },
-    [callbacks],
+    [callbacks, logClientEvent],
   );
 
   const { logServerEvent } = useEvent();
 
   const historyHandlers = useHandleSessionHistory().current;
 
-  function handleTransportEvent(event: any) {
-    const transportEvent = event?.event ?? event;
-    callbacks.onTransportEvent?.(transportEvent);
-    // Handle additional server events that aren't managed by the session
-    switch (transportEvent.type) {
-      case "conversation.item.input_audio_transcription.completed": {
-        historyHandlers.handleTranscriptionCompleted(transportEvent);
-        break;
+  const handleTransportEvent = useCallback(
+    (event: any) => {
+      const transportEvent = event?.event ?? event;
+      callbacks.onTransportEvent?.(transportEvent);
+      // Handle additional server events that aren't managed by the session
+      switch (transportEvent.type) {
+        case "conversation.item.input_audio_transcription.completed": {
+          historyHandlers.handleTranscriptionCompleted(transportEvent);
+          break;
+        }
+        case "response.audio_transcript.done": {
+          historyHandlers.handleTranscriptionCompleted(transportEvent);
+          break;
+        }
+        case "response.audio_transcript.delta": {
+          historyHandlers.handleTranscriptionDelta(transportEvent);
+          break;
+        }
+        default: {
+          logServerEvent(transportEvent);
+          break;
+        }
       }
-      case "response.audio_transcript.done": {
-        historyHandlers.handleTranscriptionCompleted(transportEvent);
-        break;
-      }
-      case "response.audio_transcript.delta": {
-        historyHandlers.handleTranscriptionDelta(transportEvent);
-        break;
-      }
-      default: {
-        logServerEvent(transportEvent);
-        break;
-      } 
-    }
-  }
-
-  const codecParamRef = useRef<string>(
-    (typeof window !== 'undefined'
-      ? (new URLSearchParams(window.location.search).get('codec') ?? 'opus')
-      : 'opus')
-      .toLowerCase(),
+    },
+    [callbacks, historyHandlers, logServerEvent]
   );
 
-  // Wrapper to pass current codec param.
-  // This lets you use the codec selector in the UI to force narrow-band (8 kHz) codecs to
-  // simulate how the voice agent sounds over a PSTN/SIP phone call.
+  const codecParamRef = useRef<string>("opus");
   const applyCodec = useCallback(
     (pc: RTCPeerConnection) => applyCodecPreferences(pc, codecParamRef.current),
     [],
   );
 
-  const handleAgentHandoff = (item: any) => {
-    const history = item.context.history;
-    const lastMessage = history[history.length - 1];
-    const agentName = lastMessage.name.split("transfer_to_")[1];
-    callbacks.onAgentHandoff?.(agentName);
-  };
+  const handleAgentHandoff = useCallback(
+    (item: any) => {
+      const history = item.context.history;
+      const lastMessage = history[history.length - 1];
+      const agentName = lastMessage.name.split("transfer_to_")[1];
+      callbacks.onAgentHandoff?.(agentName);
+    },
+    [callbacks]
+  );
 
   const attachSessionListeners = useCallback(
     (session: RealtimeSession) => {
@@ -124,7 +121,6 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       outputGuardrails,
     }: ConnectOptions) => {
       if (sessionRef.current) return; // already connected
-
       updateStatus('CONNECTING');
 
       const ek = await getEphemeralKey();

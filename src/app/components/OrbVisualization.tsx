@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { postClientLog } from "@/app/lib/clientLog";
 
 const VERTEX_SHADER = `#version 300 es
 out vec4 out_position;
@@ -163,18 +164,20 @@ float cnoise(vec3 P) {
 }
 
 // --- STATE SHADER LOGIC ---
-ColoredSDF applyIdleState(ColoredSDF sdf, SDFArgs args) {
+ColoredSDF getIdleState(SDFArgs args) {
+    ColoredSDF sdf;
     float radius = 0.33;
-    float d = length(args.st) - radius;
-    sdf.distance = mix(sdf.distance, d, args.amount);
-    sdf.color = mix(sdf.color, vec4(u_bloopColorLow, 1.0), args.amount);
+    sdf.distance = length(args.st) - radius;
+    sdf.color = vec4(u_bloopColorLow, 1.0);
     return sdf;
 }
 
-ColoredSDF applyThinkState(ColoredSDF sdf, SDFArgs args) {
+ColoredSDF getThinkState(SDFArgs args) {
+    ColoredSDF sdf;
     float d = 1000.0;
     int count = 5;
     float entryAnimation = spring(scaled(0.0, 1.0, args.duration), 1.0);
+    vec3 thinkColor = mix(u_bloopColorMid, u_bloopColorHigh, 0.6);
     for (int i = 0; i < count; i++) {
         float f = float(i + 1) / float(count);
         float a = -f * pi * 2.0 + args.time / 3.0 + spring(scaled(0.0, 10.0, args.duration), 1.0) * pi / 2.0;
@@ -184,32 +187,36 @@ ColoredSDF applyThinkState(ColoredSDF sdf, SDFArgs args) {
         float dd = length(args.st - pos) - args.mainRadius * 0.5;
         d = opSmoothUnion(d, dd, 0.03 * scaled(0.0, 10.0, args.duration) + 0.8 * (1.0 - entryAnimation));
     }
-    sdf.distance = mix(sdf.distance, d, args.amount);
-    sdf.color = mix(sdf.color, vec4(1.0), args.amount);
+    sdf.distance = d;
+    sdf.color = vec4(thinkColor, 1.0);
     return sdf;
 }
 
-ColoredSDF applyHaltState(ColoredSDF sdf, SDFArgs args) {
+ColoredSDF getHaltState(SDFArgs args) {
+    ColoredSDF sdf;
     float radius = mix(0.4, 0.45, sin(args.time * 0.25) * 0.5 + 0.5);
     float strokeWidth = mix(radius / 2.0, 0.02, args.amount);
     radius -= strokeWidth;
     radius *= mix(0.7, 1.0, args.amount);
     float circle = abs(length(args.st) - radius) - strokeWidth;
-    sdf.distance = mix(sdf.distance, circle, args.amount);
-    sdf.color = mix(sdf.color, vec4(1.0, 0.2, 0.2, 0.8), args.amount);
+    sdf.distance = circle;
+    sdf.color = vec4(1.0, 0.2, 0.2, 0.8);
     return sdf;
 }
 
 // Active State (Listen/Speak) - Exact watercolor effect from reference
-ColoredSDF applyActiveState(ColoredSDF sdf, SDFArgs args) {
+ColoredSDF getActiveState(SDFArgs args) {
+    ColoredSDF sdf;
     float listeningAmount = u_isListening;
     float entryAnimation = fixedSpring(scaled(0.0, 2.0, args.duration), 0.92);
     
     // Radius calculation matching reference exactly
-    float radius = mix(0.43, 0.37, listeningAmount) * entryAnimation + u_micLevel * 0.065;
+    float baseRadius = mix(0.43, 0.37, listeningAmount);
+    float entryScale = mix(0.9, 1.0, entryAnimation);
+    float radius = baseRadius * entryScale + u_micLevel * 0.065;
     
     // Oscillation for visual interest
-    float maxDisplacement = 0.01;
+    float maxDisplacement = 0.0;
     float oscillationPeriod = 4.0;
     float displacementOffset = maxDisplacement * sin(2.0 * pi / oscillationPeriod * args.time);
     vec2 adjusted_st = args.st - vec2(0.0, displacementOffset);
@@ -318,8 +325,8 @@ ColoredSDF applyActiveState(ColoredSDF sdf, SDFArgs args) {
     sinColor = blendLinearBurn_13_5(sinColor, mix(u_bloopColorMain, u_bloopColorMid, 1.0 - sn2Bis), sn2);
     sinColor = mix(sinColor, mix(u_bloopColorMain, u_bloopColorHigh, 1.0 - sn2Third), sn2 * sn2Bis);
 
-    sdf.color = mix(sdf.color, vec4(sinColor, 1.0), args.amount);
-    sdf.distance = mix(sdf.distance, length(adjusted_st) - radius, args.amount);
+    sdf.color = vec4(sinColor, 1.0);
+    sdf.distance = length(adjusted_st) - radius;
 
     return sdf;
 }
@@ -329,52 +336,74 @@ void main() {
     vec2 st = out_uv - 0.5;
     st.y *= u_viewport.y / u_viewport.x;
     
-    ColoredSDF sdf;
-    sdf.distance = 1000.0;
-    sdf.color = vec4(1.0);
-    
     SDFArgs args;
     args.st = st;
     args.time = u_time;
     args.mainRadius = 0.49;
     
     float idleAmount = max(0.0, 1.0 - (u_stateListen + u_stateThink + u_stateSpeak + u_stateHalt));
-    
-    // State Application & Blending
-    SDFArgs idleArgs = args;
-    idleArgs.amount = idleAmount;
-    idleArgs.duration = u_time;
-    sdf = applyIdleState(sdf, idleArgs);
-    
-    // Combined Listen/Speak state
     float activeAmount = max(u_stateListen, u_stateSpeak);
+    
+    float totalDist = 0.0;
+    vec4 totalColor = vec4(0.0);
+    float totalWeight = 0.0;
+
+    // Idle
+    if (idleAmount > 0.0) {
+        SDFArgs tmp = args;
+        tmp.amount = 1.0;
+        tmp.duration = u_time;
+        ColoredSDF res = getIdleState(tmp);
+        totalDist += res.distance * idleAmount;
+        totalColor += res.color * idleAmount;
+        totalWeight += idleAmount;
+    }
+    
+    // Active
     if (activeAmount > 0.0) {
-        SDFArgs activeArgs = args;
-        activeArgs.amount = activeAmount;
-        activeArgs.duration = u_stateTime;
-        sdf = applyActiveState(sdf, activeArgs);
+        SDFArgs tmp = args;
+        tmp.amount = 1.0;
+        tmp.duration = u_stateTime;
+        ColoredSDF res = getActiveState(tmp);
+        totalDist += res.distance * activeAmount;
+        totalColor += res.color * activeAmount;
+        totalWeight += activeAmount;
     }
     
+    // Think
     if (u_stateThink > 0.0) {
-        SDFArgs thinkArgs = args;
-        thinkArgs.amount = u_stateThink;
-        thinkArgs.duration = u_stateTime;
-        sdf = applyThinkState(sdf, thinkArgs);
+        SDFArgs tmp = args;
+        tmp.amount = 1.0;
+        tmp.duration = u_stateTime;
+        ColoredSDF res = getThinkState(tmp);
+        totalDist += res.distance * u_stateThink;
+        totalColor += res.color * u_stateThink;
+        totalWeight += u_stateThink;
     }
     
+    // Halt
     if (u_stateHalt > 0.0) {
-        SDFArgs haltArgs = args;
-        haltArgs.amount = u_stateHalt;
-        haltArgs.duration = u_stateTime;
-        sdf = applyHaltState(sdf, haltArgs);
+        SDFArgs tmp = args;
+        tmp.amount = u_stateHalt; // Use amount for animation
+        tmp.duration = u_stateTime;
+        ColoredSDF res = getHaltState(tmp);
+        totalDist += res.distance * u_stateHalt;
+        totalColor += res.color * u_stateHalt;
+        totalWeight += u_stateHalt;
     }
     
     // Final Rendering
     float clampingTolerance = 0.0075;
-    float clampedShape = smoothstep(clampingTolerance, 0.0, sdf.distance);
-    float alpha = sdf.color.a * clampedShape;
+    float clampedShape = smoothstep(clampingTolerance, 0.0, totalDist);
+    float alpha = totalColor.a * clampedShape;
     
-    fragColor = vec4(sdf.color.rgb * alpha, alpha);
+    // Normalize color by weight to prevent darkening during transitions
+    vec3 finalColor = totalColor.rgb;
+    if (totalWeight > 0.001) {
+        finalColor /= totalWeight;
+    }
+    
+    fragColor = vec4(finalColor * alpha, alpha);
 }`;
 
 const COLOR_THEMES = {
@@ -420,39 +449,52 @@ export type AudioMetrics = {
   micLevel: number;
 };
 
+let orbVisualWasReady = false;
+
+type NoiseTextureLoad = {
+  texture: WebGLTexture;
+  ready: Promise<void>;
+  cancel: () => void;
+};
+
 type OrbVisualizationProps = {
   audioMetricsRef: React.MutableRefObject<AudioMetrics>;
   orbState: OrbState;
   stateStartTimeMs: number;
   isListening: boolean;
-  isActive: boolean;
   size?: number;
   theme?: ColorTheme;
   className?: string;
 };
 
-function loadNoiseTexture(gl: WebGL2RenderingContext): Promise<WebGLTexture> {
-  return new Promise((resolve, reject) => {
-    const texture = gl.createTexture();
-    if (!texture) {
-      reject(new Error("Failed to create texture"));
-      return;
-    }
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      1,
-      1,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      new Uint8Array([0, 0, 255, 255])
-    );
+function loadNoiseTexture(gl: WebGL2RenderingContext): NoiseTextureLoad {
+  const texture = gl.createTexture();
+  if (!texture) {
+    throw new Error("Failed to create texture");
+  }
 
-    const image = new Image();
-    image.onload = function () {
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    1,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array([0, 0, 255, 255])
+  );
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  let canceled = false;
+  const image = new Image();
+  const ready = new Promise<void>((resolve, reject) => {
+    image.onload = () => {
+      if (canceled) return;
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texImage2D(
         gl.TEXTURE_2D,
@@ -466,11 +508,25 @@ function loadNoiseTexture(gl: WebGL2RenderingContext): Promise<WebGLTexture> {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      resolve(texture);
+      resolve();
     };
-    image.onerror = reject;
-    image.src = "/noise-watercolor-m3j88gni.webp";
+    image.onerror = () => {
+      if (canceled) return;
+      reject(new Error("Failed to load noise texture"));
+    };
   });
+  image.src = "/noise-watercolor-m3j88gni.webp";
+
+  const cancel = () => {
+    canceled = true;
+    image.onload = null;
+    image.onerror = null;
+    if (image.src) {
+      image.src = "";
+    }
+  };
+
+  return { texture, ready, cancel };
 }
 
 export function OrbVisualization({
@@ -478,9 +534,8 @@ export function OrbVisualization({
   orbState,
   stateStartTimeMs,
   isListening,
-  isActive,
   size = 320,
-  theme = "HELLO_TIBOR",
+  theme = "BLUE",
   className,
 }: OrbVisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -489,7 +544,8 @@ export function OrbVisualization({
   const animationFrameRef = useRef<number | null>(null);
   const noiseTextureRef = useRef<WebGLTexture | null>(null);
   const noiseReadyTimeRef = useRef<number | null>(null);
-  const [isVisualReady, setIsVisualReady] = useState(false);
+  const noiseLoadIdRef = useRef(0);
+  const [isVisualReady, setIsVisualReady] = useState(() => orbVisualWasReady);
   const stateRef = useRef<OrbState>(orbState);
   const stateStartTimeRef = useRef<number>(stateStartTimeMs);
   const listeningRef = useRef(isListening);
@@ -498,6 +554,29 @@ export function OrbVisualization({
   const [isSupported, setIsSupported] = useState(true);
 
   const themeColors = useMemo(() => COLOR_THEMES[theme], [theme]);
+
+  useEffect(() => {
+    postClientLog({ type: "orb.mount", payload: { size, theme } });
+    return () => {
+      postClientLog({ type: "orb.unmount" });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    postClientLog({
+      type: "orb.props",
+      payload: { orbState, isListening },
+    });
+  }, [orbState, isListening]);
+
+  useEffect(() => {
+    postClientLog({ type: "orb.visual_ready", payload: { isVisualReady } });
+  }, [isVisualReady]);
+
+  useEffect(() => {
+    postClientLog({ type: "orb.support", payload: { isSupported } });
+  }, [isSupported]);
 
   useEffect(() => {
     stateRef.current = orbState;
@@ -510,6 +589,12 @@ export function OrbVisualization({
   useEffect(() => {
     listeningRef.current = isListening;
   }, [isListening]);
+
+  useEffect(() => {
+    if (orbVisualWasReady && noiseReadyTimeRef.current === null) {
+      noiseReadyTimeRef.current = performance.now();
+    }
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -525,6 +610,16 @@ export function OrbVisualization({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      postClientLog({ type: "orb.webgl_context_lost" });
+    };
+    const handleContextRestored = () => {
+      postClientLog({ type: "orb.webgl_context_restored" });
+    };
+    canvas.addEventListener("webglcontextlost", handleContextLost);
+    canvas.addEventListener("webglcontextrestored", handleContextRestored);
 
     const gl = canvas.getContext("webgl2", { premultipliedAlpha: true });
     if (!gl) {
@@ -569,31 +664,62 @@ export function OrbVisualization({
     glRef.current = gl;
     programRef.current = program;
 
-    loadNoiseTexture(gl)
-      .then((texture) => {
-        noiseTextureRef.current = texture;
-        if (noiseReadyTimeRef.current === null) {
-          noiseReadyTimeRef.current = performance.now();
-          setIsVisualReady(true);
-        }
-      })
-      .catch(() => {
-        noiseTextureRef.current = null;
-      });
+    const loadId = noiseLoadIdRef.current + 1;
+    noiseLoadIdRef.current = loadId;
+    let didCancel = false;
+    let noiseLoad: NoiseTextureLoad | null = null;
+
+    try {
+      noiseLoad = loadNoiseTexture(gl);
+      noiseTextureRef.current = noiseLoad.texture;
+    } catch {
+      noiseTextureRef.current = null;
+    }
+
+    if (noiseLoad) {
+      noiseLoad.ready
+        .then(() => {
+          if (didCancel || noiseLoadIdRef.current !== loadId) {
+            gl.deleteTexture(noiseLoad.texture);
+            return;
+          }
+          if (noiseReadyTimeRef.current === null) {
+            noiseReadyTimeRef.current = performance.now();
+          }
+          if (!orbVisualWasReady) {
+            setIsVisualReady(true);
+            orbVisualWasReady = true;
+          }
+        })
+        .catch(() => {
+          if (didCancel || noiseLoadIdRef.current !== loadId) return;
+        });
+    }
 
     return () => {
+      didCancel = true;
+      noiseLoadIdRef.current += 1;
+      noiseLoad?.cancel();
+      if (noiseLoad?.texture) {
+        gl.deleteTexture(noiseLoad.texture);
+      }
+      if (noiseTextureRef.current === noiseLoad?.texture) {
+        noiseTextureRef.current = null;
+      }
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
       glRef.current = null;
       programRef.current = null;
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
+      canvas.removeEventListener("webglcontextrestored", handleContextRestored);
     };
   }, []);
 
   useEffect(() => {
     const gl = glRef.current;
     const program = programRef.current;
-    if (!gl || !program || !isActive) return;
+    if (!gl || !program) return;
 
     const stateTargets = {
       idle: { listen: 0, think: 0, speak: 0, halt: 0 },
@@ -654,8 +780,8 @@ export function OrbVisualization({
       phaseSpeed = phaseSpeed * 0.95 + targetSpeed * 0.05;
       animationPhase += PHASE_INCREMENT * phaseSpeed;
 
-      const STATE_SMOOTHING = 0.85;
-      const targets = stateTargets[stateRef.current];
+      const STATE_SMOOTHING = 0.7;
+      const targets = stateTargets[stateRef.current] || stateTargets.idle;
       interpolatedStates.listen =
         interpolatedStates.listen * STATE_SMOOTHING +
         targets.listen * (1 - STATE_SMOOTHING);
@@ -670,7 +796,8 @@ export function OrbVisualization({
         targets.halt * (1 - STATE_SMOOTHING);
 
       const LISTENING_SMOOTHING = 0.96;
-      const listeningTarget = listeningRef.current ? 1.0 : 0.0;
+      const listeningTarget =
+        listeningRef.current || stateRef.current === "speak" ? 1.0 : 0.0;
       interpolatedListening =
         interpolatedListening * LISTENING_SMOOTHING +
         listeningTarget * (1 - LISTENING_SMOOTHING);
@@ -690,7 +817,9 @@ export function OrbVisualization({
 
       const audio = audioMetricsRef.current;
       const micLevel =
-        stateRef.current === "listen" ? audio.micLevel : audio.micLevel * 0.5;
+        stateRef.current === "listen"
+          ? audio.micLevel
+          : Math.max(audio.micLevel * 0.5, 0.1);
 
       setUniform("u_time", animationPhase);
       setUniform("u_stateTime", stateTime);
@@ -727,7 +856,7 @@ export function OrbVisualization({
         animationFrameRef.current = null;
       }
     };
-  }, [audioMetricsRef, isActive, themeColors]);
+  }, [audioMetricsRef, themeColors]);
 
   return (
     <div className={cn("flex h-full w-full items-center justify-center", className)}>

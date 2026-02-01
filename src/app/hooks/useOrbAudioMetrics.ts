@@ -186,17 +186,21 @@ export function useOrbAudioMetrics({
       const nextStreamId = outputStream?.id ?? null;
       if (nextStreamId !== lastOutputStreamIdRef.current) {
         lastOutputStreamIdRef.current = nextStreamId;
-        resetOutput();
-        if (audioElement) {
-          outputNodeCache.delete(audioElement);
+        if (
+          outputStream ||
+          outputSourceRef.current instanceof MediaStreamAudioSourceNode
+        ) {
+          resetOutput();
         }
       }
       setupOutput();
       setupMic();
     } else {
-      resetOutput();
-      if (audioElement) {
-        outputNodeCache.delete(audioElement);
+      if (
+        outputStream ||
+        outputSourceRef.current instanceof MediaStreamAudioSourceNode
+      ) {
+        resetOutput();
       }
       stopMic();
       stopAnimation();

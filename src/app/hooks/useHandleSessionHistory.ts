@@ -86,7 +86,7 @@ export function useHandleSessionHistory() {
   }
 
   function handleHistoryAdded(item: any) {
-    console.log("[handleHistoryAdded] ", item);
+    logServerEvent({ type: "debug.history_added", payload: item });
     if (!item || item.type !== 'message') return;
 
     const { itemId, role, content = [] } = item;
@@ -111,7 +111,7 @@ export function useHandleSessionHistory() {
   }
 
   function handleHistoryUpdated(items: any[]) {
-    console.log("[handleHistoryUpdated] ", items);
+    logServerEvent({ type: "debug.history_updated", payload: items });
     items.forEach((item: any) => {
       if (!item || item.type !== 'message') return;
 
@@ -161,7 +161,10 @@ export function useHandleSessionHistory() {
   }
 
   function handleGuardrailTripped(details: any, _agent: any, guardrail: any) {
-    console.log("[guardrail tripped]", details, _agent, guardrail);
+    logServerEvent({
+      type: "debug.guardrail_tripped",
+      payload: { details, agent: _agent, guardrail },
+    });
     const moderation = extractModeration(guardrail.result.output.outputInfo);
     logServerEvent({ type: 'guardrail_tripped', payload: moderation });
 

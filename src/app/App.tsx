@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 
 import {
@@ -38,9 +37,10 @@ import {
 } from "@/components/ui/sidebar";
 import { ToolModal } from "@/components/ui/tool-modal";
 import { cn } from "@/lib/utils";
-import { OrbVisualization, type OrbState } from "@/app/components/OrbVisualization";
+import dynamic from "next/dynamic";
 import { useOrbAudioMetrics } from "@/app/hooks/useOrbAudioMetrics";
-import { useOrbMachine } from "@/app/hooks/useOrbMachine";
+import { useAppMachine } from "@/app/hooks/useAppMachine";
+import { postClientLog } from "@/app/lib/clientLog";
 import {
   ArrowUp,
   Copy,
@@ -81,6 +81,20 @@ import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
 const sdkScenarioMap: Record<string, RealtimeAgent[]> = {
   chatSupervisor: chatSupervisorScenario,
 };
+
+const CONNECT_RETRY_MS = 5000;
+const ASSISTANT_SPEAKING_SILENCE_MS = 1200;
+
+const OrbVisualizationClient = dynamic(
+  () =>
+    import("@/app/components/OrbVisualization").then(
+      (mod) => mod.OrbVisualization
+    ),
+  {
+    ssr: false,
+    loading: () => <div className="h-full w-full" />,
+  }
+);
 
 // Initial conversation history
 const conversationHistory = [
@@ -171,13 +185,11 @@ const conversationHistory = [
 type ChatSidebarProps = {
   isAudioPlaybackEnabled: boolean;
   setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  isOrbMode: boolean;
 };
 
 function ChatSidebar({
   isAudioPlaybackEnabled,
   setIsAudioPlaybackEnabled,
-  isOrbMode,
 }: ChatSidebarProps) {
   return (
     <Sidebar>
@@ -185,7 +197,7 @@ function ChatSidebar({
         <div className="flex flex-row items-center gap-2 px-2">
           <div className="bg-primary/10 size-8 rounded-md"></div>
           <div className="text-md font-base text-primary tracking-tight">
-            abundantui
+            what the sigma is abundant ui?
           </div>
         </div>
         <Button variant="ghost" className="size-8">
@@ -309,7 +321,7 @@ function ChatContent({
     <main className="flex h-screen flex-col overflow-hidden">
       <header className="bg-background z-10 flex h-16 w-full shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
-        <div className="text-foreground">Chat Supervisor</div>
+        <div className="text-foreground">erm what the sigma uwu O MAII GAHHHH UWU</div>
         <div className="ml-auto">
           <Button
             variant="outline"
@@ -340,7 +352,7 @@ function ChatContent({
           className={cn(
             "relative z-10 h-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
             isOrbMode
-              ? "pointer-events-none scale-[0.98] opacity-0 blur-[1px]"
+              ? "pointer-events-none scale-[0.98] opacity-0"
               : "opacity-100"
           )}
           aria-hidden={isOrbMode}
@@ -584,7 +596,6 @@ function FullChatApp({
       <ChatSidebar
         isAudioPlaybackEnabled={isAudioPlaybackEnabled}
         setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
-        isOrbMode={isOrbMode}
       />
       <SidebarInset>
         <ChatContent
@@ -606,9 +617,6 @@ function FullChatApp({
 }
 
 function App() {
-  const searchParams = useSearchParams()!;
-  const router = useRouter();
-
   const {
     addTranscriptMessage,
     addTranscriptBreadcrumb,
@@ -635,6 +643,85 @@ function App() {
   );
   // Ref to identify whether the latest agent switch came from an automatic handoff
   const handoffTriggeredRef = useRef(false);
+  const preferencesHydratedRef = useRef(false);
+  const connectRetryAfterRef = useRef(0);
+  const connectInFlightRef = useRef(false);
+  const speakingStopTimeoutRef = useRef<number | null>(null);
+  const assistantSpeakingRef = useRef(false);
+  const lastAssistantAudioMsRef = useRef(0);
+  const lastAppStateRef = useRef<Record<string, any> | null>(null);
+
+  const { snapshot: appSnapshot, send: sendAppEvent } = useAppMachine({
+    initialAudioPlaybackEnabled: true,
+    initialVoiceEnabled: false,
+    initialMode: "chat",
+  });
+  const {
+    mode,
+    voiceEnabled: isVoiceEnabled,
+    audioPlaybackEnabled: isAudioPlaybackEnabled,
+    sessionStatus,
+    prompt,
+    userSpeaking,
+    assistantThinking,
+    assistantSpeaking,
+    orbState,
+    orbAudioSource,
+    orbIsListening,
+    orbStateStartTimeMs: orbStateStartTime,
+  } = appSnapshot.context;
+  const isOrbMode = mode === "orb";
+
+  useEffect(() => {
+    const nextState = {
+      mode,
+      sessionStatus,
+      voiceEnabled: isVoiceEnabled,
+      audioPlaybackEnabled: isAudioPlaybackEnabled,
+      userSpeaking,
+      assistantThinking,
+      assistantSpeaking,
+      orbState,
+      orbAudioSource,
+      orbIsListening,
+      orbStateStartTime,
+    };
+
+    const prevState = lastAppStateRef.current;
+    if (!prevState) {
+      postClientLog({ type: "app.state.init", payload: nextState });
+      lastAppStateRef.current = nextState;
+      return;
+    }
+
+    const diff: Record<string, { from: any; to: any }> = {};
+    (Object.keys(nextState) as Array<keyof typeof nextState>).forEach((key) => {
+      if (!Object.is(prevState[key], nextState[key])) {
+        diff[key] = { from: prevState[key], to: nextState[key] };
+      }
+    });
+
+    if (Object.keys(diff).length > 0) {
+      postClientLog({
+        type: "app.state.change",
+        payload: { diff, next: nextState },
+      });
+    }
+
+    lastAppStateRef.current = nextState;
+  }, [
+    mode,
+    sessionStatus,
+    isVoiceEnabled,
+    isAudioPlaybackEnabled,
+    userSpeaking,
+    assistantThinking,
+    assistantSpeaking,
+    orbState,
+    orbAudioSource,
+    orbIsListening,
+    orbStateStartTime,
+  ]);
 
   const sdkAudioElement = useMemo(() => {
     if (typeof window === "undefined") return undefined;
@@ -653,83 +740,147 @@ function App() {
     }
   }, [sdkAudioElement]);
 
-  const [sessionStatus, setSessionStatus] =
-    useState<SessionStatus>("DISCONNECTED");
-  const [prompt, setPrompt] = useState<string>("");
-  const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState<boolean>(
-    () => {
-      if (typeof window === "undefined") return true;
-      const stored = localStorage.getItem("audioPlaybackEnabled");
-      return stored ? stored === "true" : true;
-    }
+  const setPrompt = useCallback(
+    (value: string) => {
+      sendAppEvent({ type: "PROMPT_CHANGED", value });
+    },
+    [sendAppEvent]
   );
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    const stored = localStorage.getItem("voiceEnabled");
-    return stored ? stored === "true" : false;
-  });
 
-  const isOrbMode = searchParams.get("mode") === "orb";
+  const setIsAudioPlaybackEnabled = useCallback(
+    (value: React.SetStateAction<boolean>) => {
+      const nextValue =
+        typeof value === "function" ? value(isAudioPlaybackEnabled) : value;
+      sendAppEvent({ type: "SET_AUDIO_PLAYBACK", value: nextValue });
+    },
+    [isAudioPlaybackEnabled, sendAppEvent]
+  );
 
-  const [orbStateStartTime, setOrbStateStartTime] = useState<number>(() => {
-    if (typeof performance === "undefined") return 0;
-    return performance.now();
-  });
-  const {
-    orbState,
-    orbAudioSource,
-    orbIsListening,
-    sendOrbEvent,
-  } = useOrbMachine({
-    isOrbMode,
-    isVoiceEnabled,
-    sessionStatus,
-  });
-  const lastOrbStateRef = useRef<OrbState>(orbState);
+  const clearSpeakingStopTimeout = useCallback(() => {
+    if (speakingStopTimeoutRef.current !== null) {
+      window.clearTimeout(speakingStopTimeoutRef.current);
+      speakingStopTimeoutRef.current = null;
+    }
+  }, []);
+
+  const stopAssistantSpeakingNow = useCallback(
+    (reason: string, emitEvent: boolean = true) => {
+      clearSpeakingStopTimeout();
+      if (assistantSpeakingRef.current) {
+        if (emitEvent) {
+          sendAppEvent({ type: "ASSISTANT_SPEAKING_STOP" });
+        }
+        assistantSpeakingRef.current = false;
+        postClientLog({
+          type: "assistant.speaking.stop",
+          payload: { reason },
+        });
+      }
+    },
+    [clearSpeakingStopTimeout, sendAppEvent]
+  );
+
+  const scheduleAssistantSpeakingStop = useCallback(() => {
+    clearSpeakingStopTimeout();
+    speakingStopTimeoutRef.current = window.setTimeout(() => {
+      const elapsed = Date.now() - lastAssistantAudioMsRef.current;
+      if (
+        elapsed >= ASSISTANT_SPEAKING_SILENCE_MS &&
+        assistantSpeakingRef.current
+      ) {
+        stopAssistantSpeakingNow("silence");
+      }
+    }, ASSISTANT_SPEAKING_SILENCE_MS);
+  }, [clearSpeakingStopTimeout, stopAssistantSpeakingNow]);
+
+  const markAssistantAudioActivity = useCallback(
+    (source: string) => {
+      lastAssistantAudioMsRef.current = Date.now();
+      if (!assistantSpeakingRef.current) {
+        sendAppEvent({ type: "ASSISTANT_SPEAKING_START" });
+        assistantSpeakingRef.current = true;
+        postClientLog({
+          type: "assistant.speaking.start",
+          payload: { source },
+        });
+      }
+      scheduleAssistantSpeakingStop();
+    },
+    [scheduleAssistantSpeakingStop, sendAppEvent]
+  );
 
   useEffect(() => {
-    if (orbState !== lastOrbStateRef.current) {
-      lastOrbStateRef.current = orbState;
-      if (typeof performance !== "undefined") {
-        setOrbStateStartTime(performance.now());
-      }
-    }
-  }, [orbState]);
+    if (!audioElement) return;
+
+    const handlePlay = () => markAssistantAudioActivity("audio.play");
+    const handlePlaying = () => markAssistantAudioActivity("audio.playing");
+    const handlePause = () => scheduleAssistantSpeakingStop();
+    const handleEnded = () => scheduleAssistantSpeakingStop();
+
+    audioElement.addEventListener("play", handlePlay);
+    audioElement.addEventListener("playing", handlePlaying);
+    audioElement.addEventListener("pause", handlePause);
+    audioElement.addEventListener("ended", handleEnded);
+
+    return () => {
+      audioElement.removeEventListener("play", handlePlay);
+      audioElement.removeEventListener("playing", handlePlaying);
+      audioElement.removeEventListener("pause", handlePause);
+      audioElement.removeEventListener("ended", handleEnded);
+    };
+  }, [audioElement, markAssistantAudioActivity, scheduleAssistantSpeakingStop]);
+
+  useEffect(() => {
+    assistantSpeakingRef.current = assistantSpeaking;
+  }, [assistantSpeaking]);
+
+  useEffect(() => {
+    return () => {
+      clearSpeakingStopTimeout();
+    };
+  }, [clearSpeakingStopTimeout]);
 
   const handleTransportEvent = useCallback(
     (event: any) => {
       const transportEvent = event?.event ?? event;
       switch (transportEvent.type) {
         case "input_audio_buffer.speech_started":
-          sendOrbEvent({ type: "USER_SPEECH_START" });
+          sendAppEvent({ type: "USER_SPEECH_START" });
           break;
         case "input_audio_buffer.speech_stopped":
-          sendOrbEvent({ type: "USER_SPEECH_STOP" });
+          sendAppEvent({ type: "USER_SPEECH_STOP" });
           break;
         case "response.created":
-          sendOrbEvent({ type: "ASSISTANT_THINKING_START" });
+          sendAppEvent({ type: "ASSISTANT_THINKING_START" });
           break;
         case "output_audio_buffer.started":
         case "response.audio.delta":
-          sendOrbEvent({ type: "ASSISTANT_SPEAKING_START" });
+          markAssistantAudioActivity(transportEvent.type);
           break;
         case "output_audio_buffer.stopped":
         case "output_audio_buffer.cleared":
-        case "response.audio.done":
-          sendOrbEvent({ type: "ASSISTANT_SPEAKING_STOP" });
+          scheduleAssistantSpeakingStop();
           break;
         case "response.done":
         case "response.cancelled":
-          sendOrbEvent({ type: "ASSISTANT_IDLE" });
+          stopAssistantSpeakingNow(transportEvent.type, false);
+          sendAppEvent({ type: "ASSISTANT_IDLE" });
           break;
         case "error":
-          sendOrbEvent({ type: "RESET_ALL" });
+          stopAssistantSpeakingNow("error", false);
+          sendAppEvent({ type: "ASSISTANT_IDLE" });
+          sendAppEvent({ type: "USER_SPEECH_STOP" });
           break;
         default:
           break;
       }
     },
-    [sendOrbEvent]
+    [
+      markAssistantAudioActivity,
+      scheduleAssistantSpeakingStop,
+      sendAppEvent,
+      stopAssistantSpeakingNow,
+    ]
   );
 
   const orbAudioMetricsRef = useOrbAudioMetrics({
@@ -741,16 +892,43 @@ function App() {
   });
 
   const handleToggleOrbMode = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (isOrbMode) {
-      url.searchParams.delete("mode");
-    } else {
-      url.searchParams.set("mode", "orb");
-    }
-    const next = `${url.pathname}${url.search}`;
-    router.replace(next);
-  }, [isOrbMode, router]);
+    sendAppEvent({ type: "TOGGLE_MODE" });
+  }, [sendAppEvent]);
+
+  const handleToggleVoice = useCallback(() => {
+    sendAppEvent({ type: "TOGGLE_VOICE" });
+  }, [sendAppEvent]);
+
+  const handleConnectionChange = useCallback(
+    (s: SessionStatus) => {
+      sendAppEvent({ type: "SET_SESSION_STATUS", status: s as SessionStatus });
+    },
+    [sendAppEvent]
+  );
+
+  const handleAgentHandoff = useCallback((agentName: string) => {
+    handoffTriggeredRef.current = true;
+    setSelectedAgentName(agentName);
+  }, []);
+
+  const handleOutputAudioStream = useCallback((stream: MediaStream) => {
+    setOrbOutputStream((prev) => (prev?.id === stream.id ? prev : stream));
+  }, []);
+
+  const realtimeCallbacks = useMemo(
+    () => ({
+      onConnectionChange: handleConnectionChange,
+      onAgentHandoff: handleAgentHandoff,
+      onTransportEvent: handleTransportEvent,
+      onOutputAudioStream: handleOutputAudioStream,
+    }),
+    [
+      handleConnectionChange,
+      handleAgentHandoff,
+      handleTransportEvent,
+      handleOutputAudioStream,
+    ]
+  );
 
   const {
     connect,
@@ -759,81 +937,21 @@ function App() {
     sendEvent,
     interrupt,
     mute,
-  } = useRealtimeSession({
-    onConnectionChange: (s) => setSessionStatus(s as SessionStatus),
-    onAgentHandoff: (agentName: string) => {
-      handoffTriggeredRef.current = true;
-      setSelectedAgentName(agentName);
+  } = useRealtimeSession(realtimeCallbacks);
+
+  const sendClientEvent = useCallback(
+    (eventObj: any, eventNameSuffix = "") => {
+      try {
+        sendEvent(eventObj);
+        logClientEvent(eventObj, eventNameSuffix);
+      } catch (err) {
+        console.error("Failed to send via SDK", err);
+      }
     },
-    onTransportEvent: handleTransportEvent,
-    onOutputAudioStream: (stream: MediaStream) => {
-      setOrbOutputStream((prev) => (prev?.id === stream.id ? prev : stream));
-    },
-  });
+    [logClientEvent, sendEvent]
+  );
 
-  const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
-    try {
-      sendEvent(eventObj);
-      logClientEvent(eventObj, eventNameSuffix);
-    } catch (err) {
-      console.error("Failed to send via SDK", err);
-    }
-  };
-
-  useEffect(() => {
-    let finalAgentConfig = searchParams.get("agentConfig");
-    if (!finalAgentConfig || !allAgentSets[finalAgentConfig]) {
-      finalAgentConfig = defaultAgentSetKey;
-      const url = new URL(window.location.toString());
-      url.searchParams.set("agentConfig", finalAgentConfig);
-      window.location.replace(url.toString());
-      return;
-    }
-
-    const agents = allAgentSets[finalAgentConfig];
-    const agentKeyToUse = agents[0]?.name || "";
-
-    setSelectedAgentName(agentKeyToUse);
-    setSelectedAgentConfigSet(agents);
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (!isVoiceEnabled) return;
-    if (selectedAgentName && sessionStatus === "DISCONNECTED") {
-      connectToRealtime();
-    }
-  }, [selectedAgentName, isVoiceEnabled]);
-
-  useEffect(() => {
-    if (isVoiceEnabled) return;
-    if (sessionStatus !== "DISCONNECTED") {
-      disconnect();
-    }
-  }, [isVoiceEnabled, sessionStatus, disconnect]);
-
-  useEffect(() => {
-    if (sessionStatus === "DISCONNECTED") {
-      setOrbOutputStream(null);
-    }
-  }, [sessionStatus]);
-
-  useEffect(() => {
-    if (
-      sessionStatus === "CONNECTED" &&
-      selectedAgentConfigSet &&
-      selectedAgentName
-    ) {
-      const currentAgent = selectedAgentConfigSet.find(
-        (a) => a.name === selectedAgentName
-      );
-      addTranscriptBreadcrumb(`Agent: ${selectedAgentName}`, currentAgent);
-      updateSession(!handoffTriggeredRef.current);
-      // Reset flag after handling so subsequent effects behave normally
-      handoffTriggeredRef.current = false;
-    }
-  }, [selectedAgentConfigSet, selectedAgentName, sessionStatus]);
-
-  const fetchEphemeralKey = async (): Promise<string | null> => {
+  const fetchEphemeralKey = useCallback(async (): Promise<string | null> => {
     logClientEvent({ url: "/session" }, "fetch_session_token_request");
     const tokenResponse = await fetch("/api/session");
     const data = await tokenResponse.json();
@@ -842,22 +960,29 @@ function App() {
     if (!data.client_secret?.value) {
       logClientEvent(data, "error.no_ephemeral_key");
       console.error("No ephemeral key provided by the server");
-      setSessionStatus("DISCONNECTED");
+      sendAppEvent({ type: "SET_SESSION_STATUS", status: "DISCONNECTED" });
       return null;
     }
 
     return data.client_secret.value;
-  };
+  }, [logClientEvent, logServerEvent, sendAppEvent]);
 
-  const connectToRealtime = async () => {
-    const agentSetKey = searchParams.get("agentConfig") || "default";
+  const connectToRealtime = useCallback(async () => {
+    const agentSetKey = defaultAgentSetKey;
     if (sdkScenarioMap[agentSetKey]) {
       if (sessionStatus !== "DISCONNECTED") return;
-      setSessionStatus("CONNECTING");
+      const now = Date.now();
+      if (now < connectRetryAfterRef.current) return;
+      if (connectInFlightRef.current) return;
 
       try {
+        connectInFlightRef.current = true;
         const EPHEMERAL_KEY = await fetchEphemeralKey();
-        if (!EPHEMERAL_KEY) return;
+        if (!EPHEMERAL_KEY) {
+          connectRetryAfterRef.current = Date.now() + CONNECT_RETRY_MS;
+          connectInFlightRef.current = false;
+          return;
+        }
 
         // Ensure the selectedAgentName is first so that it becomes the root
         const reorderedAgents = [...sdkScenarioMap[agentSetKey]];
@@ -883,74 +1008,160 @@ function App() {
         });
       } catch (err) {
         console.error("Error connecting via SDK:", err);
-        setSessionStatus("DISCONNECTED");
+        sendAppEvent({ type: "SET_SESSION_STATUS", status: "DISCONNECTED" });
+        connectRetryAfterRef.current = Date.now() + CONNECT_RETRY_MS;
+      } finally {
+        connectInFlightRef.current = false;
       }
       return;
     }
-  };
+  }, [
+    addTranscriptBreadcrumb,
+    connect,
+    fetchEphemeralKey,
+    sdkAudioElement,
+    selectedAgentName,
+    sendAppEvent,
+    sessionStatus,
+    connectInFlightRef,
+  ]);
 
-  const sendSimulatedUserMessage = (text: string) => {
-    const id = uuidv4().slice(0, 32);
-    addTranscriptMessage(id, "user", text, true);
+  const sendSimulatedUserMessage = useCallback(
+    (text: string) => {
+      const id = uuidv4().slice(0, 32);
+      addTranscriptMessage(id, "user", text, true);
 
-    sendClientEvent({
-      type: "conversation.item.create",
-      item: {
-        id,
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text }],
-      },
-    });
-    sendClientEvent({ type: "response.create" }, "(simulated user text message)");
-  };
+      sendClientEvent({
+        type: "conversation.item.create",
+        item: {
+          id,
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text }],
+        },
+      });
+      sendClientEvent({ type: "response.create" }, "(simulated user text message)");
+    },
+    [addTranscriptMessage, sendClientEvent]
+  );
+  const updateSession = useCallback(
+    (shouldTriggerResponse: boolean = false) => {
+      // Keep server VAD enabled by default for a clean UI.
+      const turnDetection = {
+        type: "server_vad",
+        threshold: 0.3,
+        prefix_padding_ms: 200,
+        silence_duration_ms: 500,
+        create_response: true,
+      };
 
-  const updateSession = (shouldTriggerResponse: boolean = false) => {
-    // Keep server VAD enabled by default for a clean UI.
-    const turnDetection = {
-      type: "server_vad",
-      threshold: 0.3,
-      prefix_padding_ms: 200,
-      silence_duration_ms: 500,
-      create_response: true,
-    };
+      sendEvent({
+        type: "session.update",
+        session: {
+          turn_detection: turnDetection,
+        },
+      });
 
-    sendEvent({
-      type: "session.update",
-      session: {
-        turn_detection: turnDetection,
-      },
-    });
+      // Send an initial 'hi' message to trigger the agent to greet the user
+      if (shouldTriggerResponse) {
+        sendSimulatedUserMessage("hi");
+      }
+    },
+    [sendEvent, sendSimulatedUserMessage]
+  );
 
-    // Send an initial 'hi' message to trigger the agent to greet the user
-    if (shouldTriggerResponse) {
-      sendSimulatedUserMessage("hi");
+  useEffect(() => {
+    const agents = allAgentSets[defaultAgentSetKey];
+    const agentKeyToUse = agents[0]?.name || "";
+
+    setSelectedAgentName(agentKeyToUse);
+    setSelectedAgentConfigSet(agents);
+  }, []);
+
+  useEffect(() => {
+    if (!isVoiceEnabled) return;
+    if (selectedAgentName && sessionStatus === "DISCONNECTED") {
+      connectToRealtime();
     }
-    return;
-  };
+  }, [selectedAgentName, isVoiceEnabled, sessionStatus, connectToRealtime]);
+
+  useEffect(() => {
+    if (isVoiceEnabled) return;
+    if (sessionStatus !== "DISCONNECTED") {
+      disconnect();
+    }
+  }, [isVoiceEnabled, sessionStatus, disconnect]);
+
+  useEffect(() => {
+    if (!isVoiceEnabled) {
+      connectRetryAfterRef.current = 0;
+      connectInFlightRef.current = false;
+    }
+  }, [isVoiceEnabled]);
+
+  useEffect(() => {
+    if (sessionStatus === "DISCONNECTED") {
+      setOrbOutputStream(null);
+    }
+  }, [sessionStatus]);
+
+  useEffect(() => {
+    if (
+      sessionStatus === "CONNECTED" &&
+      selectedAgentConfigSet &&
+      selectedAgentName
+    ) {
+      const currentAgent = selectedAgentConfigSet.find(
+        (a) => a.name === selectedAgentName
+      );
+      addTranscriptBreadcrumb(`Agent: ${selectedAgentName}`, currentAgent);
+      updateSession(!handoffTriggeredRef.current);
+      // Reset flag after handling so subsequent effects behave normally
+      handoffTriggeredRef.current = false;
+    }
+  }, [selectedAgentConfigSet, selectedAgentName, sessionStatus, updateSession]);
+
+  useEffect(() => {
+    if (preferencesHydratedRef.current) return;
+    preferencesHydratedRef.current = true;
+    const storedPlayback = localStorage.getItem("audioPlaybackEnabled");
+    if (storedPlayback !== null) {
+      sendAppEvent({
+        type: "SET_AUDIO_PLAYBACK",
+        value: storedPlayback === "true",
+      });
+    }
+    const storedVoice = localStorage.getItem("voiceEnabled");
+    if (storedVoice !== null) {
+      sendAppEvent({
+        type: "SET_VOICE_ENABLED",
+        value: storedVoice === "true",
+      });
+    }
+  }, [sendAppEvent]);
 
   const handleSubmit = () => {
-    if (!prompt.trim() || sessionStatus !== "CONNECTED") return;
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt || sessionStatus !== "CONNECTED") return;
     interrupt();
 
     try {
-      sendUserText(prompt.trim());
+      sendUserText(trimmedPrompt);
     } catch (err) {
       console.error("Failed to send via SDK", err);
     }
 
-    setPrompt("");
+    sendAppEvent({ type: "CLEAR_PROMPT" });
   };
 
   useEffect(() => {
+    if (!preferencesHydratedRef.current) return;
     localStorage.setItem(
       "audioPlaybackEnabled",
       isAudioPlaybackEnabled.toString()
     );
-  }, [isAudioPlaybackEnabled]);
-  useEffect(() => {
     localStorage.setItem("voiceEnabled", isVoiceEnabled.toString());
-  }, [isVoiceEnabled]);
+  }, [isAudioPlaybackEnabled, isVoiceEnabled]);
 
   useEffect(() => {
     if (audioElementRef.current) {
@@ -973,7 +1184,7 @@ function App() {
     } catch (err) {
       console.warn("Failed to toggle SDK mute", err);
     }
-  }, [isAudioPlaybackEnabled]);
+  }, [isAudioPlaybackEnabled, mute]);
 
   // Ensure mute state is propagated to transport right after we connect or
   // whenever the SDK client reference becomes available.
@@ -985,7 +1196,7 @@ function App() {
         console.warn("mute sync after connect failed", err);
       }
     }
-  }, [sessionStatus, isAudioPlaybackEnabled]);
+  }, [sessionStatus, isAudioPlaybackEnabled, mute]);
 
   useEffect(() => {
     const breadcrumbs = [...transcriptItems]
@@ -1072,7 +1283,7 @@ function App() {
         isAudioPlaybackEnabled={isAudioPlaybackEnabled}
         setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
         isVoiceEnabled={isVoiceEnabled}
-        onToggleVoice={() => setIsVoiceEnabled((prev) => !prev)}
+        onToggleVoice={handleToggleVoice}
         prompt={prompt}
         setPrompt={setPrompt}
         isLoading={isLoading}
@@ -1082,12 +1293,11 @@ function App() {
         isOrbMode={isOrbMode}
         onToggleOrbMode={handleToggleOrbMode}
         orbLayer={
-          <OrbVisualization
+          <OrbVisualizationClient
             audioMetricsRef={orbAudioMetricsRef}
             orbState={orbState}
             stateStartTimeMs={orbStateStartTime}
             isListening={orbIsListening}
-            isActive={isOrbMode}
             size={320}
             className="h-full w-full"
           />
