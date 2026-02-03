@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="./public/orb-chat-demo.png" alt="Orb and Chat UI" width="800" />
+  <img src="./public/orb-chat-demo.png" alt="Orb and Chat UI" width="800" style="border-radius: 32px; border: 1px solid #e1e4e8;" />
 </p>
 
 ## Overview
@@ -20,7 +20,7 @@ The **Abundant UI Voice Agent Template** is designed for developers who want to 
 - **Integrated Tooling:** Comes out of the box with a Todo List example demonstrating how the agent can interact with local application state.
 
 <p align="center">
-  <img src="./public/orb.png" alt="AI Orb Shader" width="450" />
+  <img src="./public/orb.png" alt="AI Orb Shader" width="800" style="border-radius: 32px; border: 1px solid #e1e4e8;" />
 </p>
 
 ## Visual Experience
@@ -28,7 +28,7 @@ The **Abundant UI Voice Agent Template** is designed for developers who want to 
 The template includes a high-fidelity transcript view that allows users to follow the conversation in real-time, even while using voice mode.
 
 <p align="center">
-  <img src="./public/chat-transcript-demo.png" alt="Chat Transcript" width="800" />
+  <img src="./public/chat-transcript-demo.png" alt="Chat Transcript" width="800" style="border-radius: 32px; border: 1px solid #e1e4e8;" />
 </p>
 
 ## Architecture
