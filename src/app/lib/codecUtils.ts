@@ -16,7 +16,6 @@ export function applyCodecPreferences(
       .getTransceivers()
       .filter((t) => t.sender && t.sender.track?.kind === 'audio')
       .forEach((t) => t.setCodecPreferences([pref]));
-  } catch (err) {
-    console.error('[codecUtils] applyCodecPreferences error', err);
+  } catch {
   }
 }

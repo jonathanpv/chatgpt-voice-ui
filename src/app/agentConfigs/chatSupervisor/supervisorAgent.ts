@@ -136,7 +136,6 @@ async function fetchResponsesMessage(body: any) {
   });
 
   if (!response.ok) {
-    console.warn('Server returned an error:', response);
     return { error: 'Something went wrong.' };
   }
 

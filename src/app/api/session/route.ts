@@ -17,8 +17,7 @@ export async function GET() {
     );
     const data = await response.json();
     return NextResponse.json(data);
-  } catch (error) {
-    console.error("Error in /session:", error);
+  } catch {
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }

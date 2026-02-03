@@ -47,7 +47,6 @@ export async function runGuardrailClassifier(
   });
 
   if (!response.ok) {
-    console.warn('Server returned an error:', response);
     return Promise.reject('Error with runGuardrailClassifier.');
   }
 
@@ -59,8 +58,7 @@ export async function runGuardrailClassifier(
       ...output,
       testText: message,
     };
-  } catch (error) {
-    console.error('Error parsing the message content as GuardrailOutput:', error);
+  } catch {
     return Promise.reject('Failed to parse guardrail output.');
   }
 }

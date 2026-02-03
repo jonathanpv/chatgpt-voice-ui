@@ -41,7 +41,6 @@ export function useHandleSessionHistory() {
       try {
         return JSON.parse(val);
       } catch {
-        console.warn('Failed to parse JSON:', val);
         return val;
       }
     }

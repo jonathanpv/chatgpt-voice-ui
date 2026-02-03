@@ -120,7 +120,7 @@ const deriveOrbView = (context: AppContext): DerivedOrbView => {
   };
 };
 
-const applyEvent = (context: AppContext, event: AppEvent) => {
+const applyEvent = (context: AppContext, event: AppEvent): Partial<AppContext> => {
   switch (event.type) {
     case "TOGGLE_MODE":
       return { mode: context.mode === "orb" ? "chat" : "orb" };

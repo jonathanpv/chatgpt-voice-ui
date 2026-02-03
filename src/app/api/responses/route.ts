@@ -22,8 +22,7 @@ async function structuredResponse(openai: OpenAI, body: any) {
     });
 
     return NextResponse.json(response);
-  } catch (err: any) {
-    console.error('responses proxy error', err);
+  } catch {
     return NextResponse.json({ error: 'failed' }, { status: 500 }); 
   }
 }
@@ -36,8 +35,7 @@ async function textResponse(openai: OpenAI, body: any) {
     });
 
     return NextResponse.json(response);
-  } catch (err: any) {
-    console.error('responses proxy error', err);
+  } catch {
     return NextResponse.json({ error: 'failed' }, { status: 500 });
   }
 }

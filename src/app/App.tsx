@@ -944,8 +944,7 @@ function App() {
       try {
         sendEvent(eventObj);
         logClientEvent(eventObj, eventNameSuffix);
-      } catch (err) {
-        console.error("Failed to send via SDK", err);
+      } catch {
       }
     },
     [logClientEvent, sendEvent]
@@ -959,7 +958,6 @@ function App() {
 
     if (!data.client_secret?.value) {
       logClientEvent(data, "error.no_ephemeral_key");
-      console.error("No ephemeral key provided by the server");
       sendAppEvent({ type: "SET_SESSION_STATUS", status: "DISCONNECTED" });
       return null;
     }
@@ -1006,8 +1004,7 @@ function App() {
             addTranscriptBreadcrumb,
           },
         });
-      } catch (err) {
-        console.error("Error connecting via SDK:", err);
+      } catch {
         sendAppEvent({ type: "SET_SESSION_STATUS", status: "DISCONNECTED" });
         connectRetryAfterRef.current = Date.now() + CONNECT_RETRY_MS;
       } finally {
@@ -1147,8 +1144,7 @@ function App() {
 
     try {
       sendUserText(trimmedPrompt);
-    } catch (err) {
-      console.error("Failed to send via SDK", err);
+    } catch {
     }
 
     sendAppEvent({ type: "CLEAR_PROMPT" });
@@ -1167,8 +1163,7 @@ function App() {
     if (audioElementRef.current) {
       if (isAudioPlaybackEnabled) {
         audioElementRef.current.muted = false;
-        audioElementRef.current.play().catch((err) => {
-          console.warn("Autoplay may be blocked by browser:", err);
+        audioElementRef.current.play().catch(() => {
         });
       } else {
         // Mute and pause to avoid brief audio blips before pause takes effect.
@@ -1181,8 +1176,7 @@ function App() {
     // user disables playback.
     try {
       mute(!isAudioPlaybackEnabled);
-    } catch (err) {
-      console.warn("Failed to toggle SDK mute", err);
+    } catch {
     }
   }, [isAudioPlaybackEnabled, mute]);
 
@@ -1192,8 +1186,7 @@ function App() {
     if (sessionStatus === "CONNECTED") {
       try {
         mute(!isAudioPlaybackEnabled);
-      } catch (err) {
-        console.warn("mute sync after connect failed", err);
+      } catch {
       }
     }
   }, [sessionStatus, isAudioPlaybackEnabled, mute]);

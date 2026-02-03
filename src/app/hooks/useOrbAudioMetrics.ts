@@ -134,8 +134,8 @@ export function useOrbAudioMetrics({
         outputStream ??
         (audioElement.srcObject instanceof MediaStream
           ? audioElement.srcObject
-          : typeof audioElement.captureStream === "function"
-            ? audioElement.captureStream()
+          : typeof (audioElement as any).captureStream === "function"
+            ? (audioElement as any).captureStream()
             : typeof (audioElement as HTMLMediaElement & {
                 mozCaptureStream?: () => MediaStream;
               }).mozCaptureStream === "function"
@@ -220,7 +220,7 @@ export function useOrbAudioMetrics({
       dataArray: Uint8Array | null
     ) => {
       if (!analyser || !dataArray) return [0, 0, 0, 0] as const;
-      analyser.getByteFrequencyData(dataArray);
+      analyser.getByteFrequencyData(dataArray as any);
       const bands = 4;
       const loPass = 0;
       const hiPass = Math.min(400, dataArray.length);

@@ -16,8 +16,7 @@ function useAudioDownload() {
     let micStream: MediaStream;
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      console.error("Error getting microphone stream:", err);
+    } catch {
       // Fallback to an empty MediaStream if microphone access fails.
       micStream = new MediaStream();
     }
@@ -30,16 +29,14 @@ function useAudioDownload() {
     try {
       const remoteSource = audioContext.createMediaStreamSource(remoteStream);
       remoteSource.connect(destination);
-    } catch (err) {
-      console.error("Error connecting remote stream to the audio context:", err);
+    } catch {
     }
 
     // Connect the microphone audio stream.
     try {
       const micSource = audioContext.createMediaStreamSource(micStream);
       micSource.connect(destination);
-    } catch (err) {
-      console.error("Error connecting microphone stream to the audio context:", err);
+    } catch {
     }
 
     const options = { mimeType: "audio/webm" };
@@ -53,8 +50,7 @@ function useAudioDownload() {
       // Start recording without a timeslice.
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
-    } catch (err) {
-      console.error("Error starting MediaRecorder with combined stream:", err);
+    } catch {
     }
   };
 
@@ -84,7 +80,6 @@ function useAudioDownload() {
     }
 
     if (recordedChunksRef.current.length === 0) {
-      console.warn("No recorded chunks found to download.");
       return;
     }
     
@@ -110,8 +105,7 @@ function useAudioDownload() {
 
       // Clean up the blob URL after a short delay.
       setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch (err) {
-      console.error("Error converting recording to WAV:", err);
+    } catch {
     }
   };
 

@@ -126,7 +126,7 @@ function SidebarProvider({
           "--sidebar-width-mobile": SIDEBAR_WIDTH_MOBILE,
           "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
           ...style,
-        }}
+        } as any}
         data-state={open ? "expanded" : "collapsed"}
         {...props}
       >
