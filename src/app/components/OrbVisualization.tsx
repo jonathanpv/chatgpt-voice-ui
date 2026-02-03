@@ -459,9 +459,9 @@ type NoiseTextureLoad = {
 
 type OrbVisualizationProps = {
   audioMetricsRef: React.MutableRefObject<AudioMetrics>;
-  orbState: OrbState;
-  stateStartTimeMs: number;
-  isListening: boolean;
+  orbStateRef: React.MutableRefObject<OrbState>;
+  stateStartTimeMsRef: React.MutableRefObject<number>;
+  isListeningRef: React.MutableRefObject<boolean>;
   size?: number;
   theme?: ColorTheme;
   className?: string;
@@ -531,9 +531,9 @@ function loadNoiseTexture(gl: WebGL2RenderingContext): NoiseTextureLoad {
 
 export function OrbVisualization({
   audioMetricsRef,
-  orbState,
-  stateStartTimeMs,
-  isListening,
+  orbStateRef,
+  stateStartTimeMsRef,
+  isListeningRef,
   size = 320,
   theme = "BLUE",
   className,
@@ -546,9 +546,9 @@ export function OrbVisualization({
   const noiseReadyTimeRef = useRef<number | null>(null);
   const noiseLoadIdRef = useRef(0);
   const [isVisualReady, setIsVisualReady] = useState(() => orbVisualWasReady);
-  const stateRef = useRef<OrbState>(orbState);
-  const stateStartTimeRef = useRef<number>(stateStartTimeMs);
-  const listeningRef = useRef(isListening);
+  const stateRef = orbStateRef;
+  const stateStartTimeRef = stateStartTimeMsRef;
+  const listeningRef = isListeningRef;
   const sizeRef = useRef({ width: 0, height: 0 });
   const warnedUniforms = useRef(new Set<string>());
   const [isSupported, setIsSupported] = useState(true);
@@ -564,31 +564,12 @@ export function OrbVisualization({
   }, []);
 
   useEffect(() => {
-    postClientLog({
-      type: "orb.props",
-      payload: { orbState, isListening },
-    });
-  }, [orbState, isListening]);
-
-  useEffect(() => {
     postClientLog({ type: "orb.visual_ready", payload: { isVisualReady } });
   }, [isVisualReady]);
 
   useEffect(() => {
     postClientLog({ type: "orb.support", payload: { isSupported } });
   }, [isSupported]);
-
-  useEffect(() => {
-    stateRef.current = orbState;
-  }, [orbState]);
-
-  useEffect(() => {
-    stateStartTimeRef.current = stateStartTimeMs;
-  }, [stateStartTimeMs]);
-
-  useEffect(() => {
-    listeningRef.current = isListening;
-  }, [isListening]);
 
   useEffect(() => {
     if (orbVisualWasReady && noiseReadyTimeRef.current === null) {

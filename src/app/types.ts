@@ -79,6 +79,12 @@ export interface TranscriptItem {
   guardrailResult?: GuardrailResultType;
 }
 
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
 export interface Log {
   id: number;
   timestamp: string;

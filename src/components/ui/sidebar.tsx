@@ -107,18 +107,21 @@ function SidebarProvider({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [toggleSidebar]);
 
+  const contextValue = React.useMemo(
+    () => ({
+      state: open ? "expanded" : "collapsed",
+      open,
+      setOpen,
+      openMobile,
+      setOpenMobile,
+      isMobile,
+      toggleSidebar,
+    }),
+    [open, setOpen, openMobile, setOpenMobile, isMobile, toggleSidebar]
+  );
+
   return (
-    <SidebarContext.Provider
-      value={{
-        state: open ? "expanded" : "collapsed",
-        open,
-        setOpen,
-        openMobile,
-        setOpenMobile,
-        isMobile,
-        toggleSidebar,
-      }}
-    >
+    <SidebarContext.Provider value={contextValue}>
       <div
         className={cn("group/sidebar-wrapper flex min-h-svh w-full", className)}
         style={{

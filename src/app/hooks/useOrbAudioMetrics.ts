@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { MutableRefObject } from "react";
 import type { AudioMetrics } from "@/app/components/OrbVisualization";
 
 type AudioSourceMode = "mic" | "output" | "idle";
 
 type OrbAudioOptions = {
   isActive: boolean;
-  sourceMode: AudioSourceMode;
+  sourceModeRef: MutableRefObject<AudioSourceMode>;
   audioElement: HTMLAudioElement | null;
   outputStream?: MediaStream | null;
   enableMic: boolean;
@@ -31,7 +32,7 @@ const outputNodeCache = new WeakMap<HTMLMediaElement, OutputNodeCacheEntry>();
 
 export function useOrbAudioMetrics({
   isActive,
-  sourceMode,
+  sourceModeRef,
   audioElement,
   outputStream,
   enableMic,
@@ -107,11 +108,19 @@ export function useOrbAudioMetrics({
     };
 
     const setupOutput = () => {
-      if (!audioElement || outputAnalyserRef.current) return;
+      if (!audioElement) return;
 
       if (outputStream && outputStream.getAudioTracks().length === 0) {
         return;
       }
+
+      const hasOutputGraph =
+        outputSourceRef.current &&
+        outputAnalyserRef.current &&
+        outputGainRef.current &&
+        outputDataRef.current;
+
+      if (hasOutputGraph) return;
 
       if (!outputStream) {
       const cached = outputNodeCache.get(audioElement);
@@ -193,8 +202,19 @@ export function useOrbAudioMetrics({
           resetOutput();
         }
       }
+      if (
+        outputSourceRef.current &&
+        !(outputSourceRef.current instanceof MediaStreamAudioSourceNode) &&
+        outputStream
+      ) {
+        resetOutput();
+      }
       setupOutput();
-      setupMic();
+      if (enableMic) {
+        setupMic();
+      } else {
+        stopMic();
+      }
     } else {
       if (
         outputStream ||
@@ -257,6 +277,8 @@ export function useOrbAudioMetrics({
       const outputLevel =
         outputBands.reduce((sum, value) => sum + value, 0) / 4;
 
+      const sourceMode = sourceModeRef.current;
+
       let targetBands = micBands;
       if (sourceMode === "output") {
         targetBands = outputBands;
@@ -306,7 +328,7 @@ export function useOrbAudioMetrics({
     return () => {
       stopAnimation();
     };
-  }, [isActive, sourceMode]);
+  }, [isActive, sourceModeRef]);
 
   useEffect(() => {
     return () => {

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   RealtimeSession,
   RealtimeAgent,
@@ -6,7 +6,7 @@ import {
 } from '@openai/agents/realtime';
 
 import { applyCodecPreferences } from '../lib/codecUtils';
-import { useEvent } from '../contexts/EventContext';
+
 import { useHandleSessionHistory } from './useHandleSessionHistory';
 import { SessionStatus } from '../types';
 
@@ -27,28 +27,29 @@ export interface ConnectOptions {
 
 export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
   const sessionRef = useRef<RealtimeSession | null>(null);
+  const callbacksRef = useRef<RealtimeSessionCallbacks>(callbacks);
+  useEffect(() => {
+    callbacksRef.current = callbacks;
+  }, [callbacks]);
   const [status, setStatus] = useState<
     SessionStatus
   >('DISCONNECTED');
-  const { logClientEvent } = useEvent();
+
 
   const updateStatus = useCallback(
     (s: SessionStatus) => {
       setStatus(s);
-      callbacks.onConnectionChange?.(s);
-      logClientEvent({}, s);
+      callbacksRef.current.onConnectionChange?.(s);
     },
-    [callbacks, logClientEvent],
+    [],
   );
-
-  const { logServerEvent } = useEvent();
 
   const historyHandlers = useHandleSessionHistory().current;
 
   const handleTransportEvent = useCallback(
     (event: any) => {
       const transportEvent = event?.event ?? event;
-      callbacks.onTransportEvent?.(transportEvent);
+      callbacksRef.current.onTransportEvent?.(transportEvent);
       // Handle additional server events that aren't managed by the session
       switch (transportEvent.type) {
         case "conversation.item.input_audio_transcription.completed": {
@@ -64,12 +65,12 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
           break;
         }
         default: {
-          logServerEvent(transportEvent);
+          
           break;
         }
       }
     },
-    [callbacks, historyHandlers, logServerEvent]
+    [historyHandlers]
   );
 
   const codecParamRef = useRef<string>("opus");
@@ -83,19 +84,16 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       const history = item.context.history;
       const lastMessage = history[history.length - 1];
       const agentName = lastMessage.name.split("transfer_to_")[1];
-      callbacks.onAgentHandoff?.(agentName);
+      callbacksRef.current.onAgentHandoff?.(agentName);
     },
-    [callbacks]
+    []
   );
 
   const attachSessionListeners = useCallback(
     (session: RealtimeSession) => {
       // Log server errors
       session.on("error", (...args: any[]) => {
-        logServerEvent({
-          type: "error",
-          message: args[0],
-        });
+        
       });
 
       // history events
@@ -109,7 +107,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       // additional transport events
       session.on("transport_event", handleTransportEvent);
     },
-    [handleAgentHandoff, handleTransportEvent, historyHandlers, logServerEvent],
+    [handleAgentHandoff, handleTransportEvent, historyHandlers],
   );
 
   const connect = useCallback(
@@ -136,7 +134,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
               if (event.track.kind !== "audio") return;
               const stream =
                 event.streams?.[0] ?? new MediaStream([event.track]);
-              callbacks.onOutputAudioStream?.(stream);
+              callbacksRef.current.onOutputAudioStream?.(stream);
             });
             return pc;
           },
@@ -155,7 +153,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       await sessionRef.current.connect({ apiKey: ek });
       updateStatus('CONNECTED');
     },
-    [attachSessionListeners, callbacks, updateStatus],
+    [attachSessionListeners, updateStatus],
   );
 
   const disconnect = useCallback(() => {

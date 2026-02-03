@@ -1,9 +1,8 @@
 import { RealtimeItem, tool } from '@openai/agents/realtime';
 
 import { addTodoItem, getTodoItems, toggleTodoItem } from '@/app/lib/todoStore';
-import { exampleBibleExcerpts, exampleSemanticResults } from './sampleData';
 
-export const supervisorAgentInstructions = `You are an expert BibleChat supervisor agent, tasked with providing real-time guidance to a more junior agent that's chatting directly with the user. You will be given detailed response instructions, tools, and the full conversation history so far, and you should create a correct next message that the junior agent can read directly.
+export const supervisorAgentInstructions = `You are an expert Todo App supervisor agent, tasked with providing real-time guidance to a more junior agent that's chatting directly with the user. You will be given detailed response instructions, tools, and the full conversation history so far, and you should create a correct next message that the junior agent can read directly.
 
 # Instructions
 - You can provide an answer directly, or call a tool first and then answer the question.
@@ -11,13 +10,11 @@ export const supervisorAgentInstructions = `You are an expert BibleChat supervis
 - Your message will be read verbatim by the junior agent, so write like you're speaking to the user.
 
 ==== Domain-Specific Agent Instructions ====
-You are a helpful Bible study assistant for BibleChat. Provide concise, compassionate guidance. Use tools for Bible excerpts, semantic search, and TODO management.
+You are a helpful assistant for a Todo App. Provide concise, helpful guidance. Use tools for TODO management.
 
 # Tool Use Rules
-- Use getBibleExcerpt for any direct Bible quote or reference.
-- Use searchBibleSemantic to find thematically related passages.
 - Use getTodoList/addTodoItem/completeTodoItem for task management requests.
-- If a tool requires missing input (e.g., a verse reference), ask for it.
+- If a tool requires missing input (e.g., text for a new todo), ask for it.
 
 # Response Style
 - Be concise and conversational. No bullet lists.
@@ -25,56 +22,15 @@ You are a helpful Bible study assistant for BibleChat. Provide concise, compassi
 - When you use tool results, weave them into a short, clear response.
 
 # Example (tool call)
-- User: Can you share John 3:16?
-- Supervisor Assistant: getBibleExcerpt(reference="John 3:16", translation="ESV")
-- getBibleExcerpt(): { reference: "John 3:16", translation: "ESV", text: "For God so loved..." }
+- User: Add buy milk to my list
+- Supervisor Assistant: addTodoItem(text="buy milk")
+- addTodoItem(): { items: [...] }
 - Supervisor Assistant:
 # Message
-Here it is: \"For God so loved the world...\" (John 3:16, ESV). Would you like a related passage too?
+Done. I've added "buy milk" to your list.
 `;
 
 export const supervisorAgentTools = [
-  {
-    type: "function",
-    name: "getBibleExcerpt",
-    description: "Retrieve a Bible excerpt for a specific reference.",
-    parameters: {
-      type: "object",
-      properties: {
-        reference: {
-          type: "string",
-          description: "A Bible reference like 'John 3:16' or 'Psalm 23:1'.",
-        },
-        translation: {
-          type: "string",
-          description: "Optional translation, e.g. ESV, NIV, KJV.",
-        },
-      },
-      required: ["reference"],
-      additionalProperties: false,
-    },
-  },
-  {
-    type: "function",
-    name: "searchBibleSemantic",
-    description:
-      "Find thematically similar Bible passages for a query.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "A short query describing the theme or question.",
-        },
-        limit: {
-          type: "number",
-          description: "Optional max number of results to return.",
-        },
-      },
-      required: ["query"],
-      additionalProperties: false,
-    },
-  },
   {
     type: "function",
     name: "getTodoList",
@@ -145,26 +101,6 @@ async function fetchResponsesMessage(body: any) {
 
 async function getToolResponse(fName: string, args: any) {
   switch (fName) {
-    case "getBibleExcerpt": {
-      const reference = String(args?.reference ?? "").trim();
-      const translation = String(args?.translation ?? "ESV").trim() || "ESV";
-      const fallback = {
-        reference: reference || "Psalm 23:1",
-        translation,
-        text:
-          "The Lord is my shepherd; I shall not want.",
-      };
-      return exampleBibleExcerpts[reference as keyof typeof exampleBibleExcerpts] ?? fallback;
-    }
-    case "searchBibleSemantic": {
-      const query = String(args?.query ?? "").trim();
-      const limit = Number.isFinite(args?.limit) ? Number(args.limit) : 4;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      return {
-        query,
-        results: exampleSemanticResults.slice(0, Math.max(1, Math.min(limit, 8))),
-      };
-    }
     case "getTodoList": {
       return { items: getTodoItems() };
     }

@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { useTranscript } from "@/app/contexts/TranscriptContext";
-import { useEvent } from "@/app/contexts/EventContext";
+
 
 export function useHandleSessionHistory() {
   const {
@@ -13,7 +13,7 @@ export function useHandleSessionHistory() {
     updateTranscriptItem,
   } = useTranscript();
 
-  const { logServerEvent } = useEvent();
+
 
   /* ----------------------- helpers ------------------------- */
 
@@ -85,7 +85,7 @@ export function useHandleSessionHistory() {
   }
 
   function handleHistoryAdded(item: any) {
-    logServerEvent({ type: "debug.history_added", payload: item });
+    
     if (!item || item.type !== 'message') return;
 
     const { itemId, role, content = [] } = item;
@@ -110,7 +110,7 @@ export function useHandleSessionHistory() {
   }
 
   function handleHistoryUpdated(items: any[]) {
-    logServerEvent({ type: "debug.history_updated", payload: items });
+    
     items.forEach((item: any) => {
       if (!item || item.type !== 'message') return;
 
@@ -160,12 +160,9 @@ export function useHandleSessionHistory() {
   }
 
   function handleGuardrailTripped(details: any, _agent: any, guardrail: any) {
-    logServerEvent({
-      type: "debug.guardrail_tripped",
-      payload: { details, agent: _agent, guardrail },
-    });
+    
     const moderation = extractModeration(guardrail.result.output.outputInfo);
-    logServerEvent({ type: 'guardrail_tripped', payload: moderation });
+    
 
     // find the last assistant message in details.context.history
     const lastAssistant = extractLastAssistantMessage(details?.context?.history);

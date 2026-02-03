@@ -1,8 +1,8 @@
+import React from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -13,11 +13,12 @@ export type MessageProps = {
   className?: string
 } & React.HTMLProps<HTMLDivElement>
 
-const Message = ({ children, className, ...props }: MessageProps) => (
+const Message = React.memo(({ children, className, ...props }: MessageProps) => (
   <div className={cn("flex gap-3", className)} {...props}>
     {children}
   </div>
-)
+))
+Message.displayName = "Message"
 
 export type MessageAvatarProps = {
   src: string
@@ -51,7 +52,7 @@ export type MessageContentProps = {
 } & React.ComponentProps<typeof Markdown> &
   React.HTMLProps<HTMLDivElement>
 
-const MessageContent = ({
+const MessageContent = React.memo(({
   children,
   markdown = false,
   className,
@@ -71,14 +72,15 @@ const MessageContent = ({
       {children}
     </div>
   )
-}
+})
+MessageContent.displayName = "MessageContent"
 
 export type MessageActionsProps = {
   children: React.ReactNode
   className?: string
 } & React.HTMLProps<HTMLDivElement>
 
-const MessageActions = ({
+const MessageActions = React.memo(({
   children,
   className,
   ...props
@@ -89,7 +91,8 @@ const MessageActions = ({
   >
     {children}
   </div>
-)
+))
+MessageActions.displayName = "MessageActions"
 
 export type MessageActionProps = {
   className?: string
@@ -98,7 +101,7 @@ export type MessageActionProps = {
   side?: "top" | "bottom" | "left" | "right"
 } & React.ComponentProps<typeof Tooltip>
 
-const MessageAction = ({
+const MessageAction = React.memo(({
   tooltip,
   children,
   className,
@@ -106,15 +109,14 @@ const MessageAction = ({
   ...props
 }: MessageActionProps) => {
   return (
-    <TooltipProvider>
-      <Tooltip {...props}>
-        <TooltipTrigger asChild>{children}</TooltipTrigger>
-        <TooltipContent side={side} className={className}>
-          {tooltip}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip {...props}>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side={side} className={className}>
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   )
-}
+})
+MessageAction.displayName = "MessageAction"
 
 export { Message, MessageAvatar, MessageContent, MessageActions, MessageAction }

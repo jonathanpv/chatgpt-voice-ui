@@ -41,6 +41,8 @@ import dynamic from "next/dynamic";
 import { useOrbAudioMetrics } from "@/app/hooks/useOrbAudioMetrics";
 import { useAppMachine } from "@/app/hooks/useAppMachine";
 import { postClientLog } from "@/app/lib/clientLog";
+import type { OrbState } from "@/app/components/OrbVisualization";
+import type { OrbAudioSource } from "@/app/state/appMachine";
 import {
   ArrowUp,
   Copy,
@@ -63,14 +65,25 @@ import {
 } from "@/app/lib/todoStore";
 
 // Types
-import { SessionStatus } from "@/app/types";
+import { SessionStatus, type ChatMessage } from "@/app/types";
 import type { RealtimeAgent } from "@openai/agents/realtime";
 
 // Context providers & hooks
 import { useTranscript } from "@/app/contexts/TranscriptContext";
-import { useEvent } from "@/app/contexts/EventContext";
+
+import {
+  ChatActionsProvider,
+  ChatOrbProvider,
+  ChatStatusProvider,
+  ChatViewProvider,
+  useChatActions,
+  useChatOrb,
+  useChatStatus,
+  useChatView,
+} from "@/app/contexts/ChatUIContext";
 import { useRealtimeSession } from "@/app/hooks/useRealtimeSession";
 import { createModerationGuardrail } from "@/app/agentConfigs/guardrails";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 // Agent configs
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
@@ -182,22 +195,17 @@ const conversationHistory = [
   },
 ];
 
-type ChatSidebarProps = {
-  isAudioPlaybackEnabled: boolean;
-  setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-};
+const ChatSidebar = React.memo(function ChatSidebar() {
+  const { isAudioPlaybackEnabled } = useChatStatus();
+  const { setAudioPlaybackEnabled } = useChatActions();
 
-function ChatSidebar({
-  isAudioPlaybackEnabled,
-  setIsAudioPlaybackEnabled,
-}: ChatSidebarProps) {
   return (
     <Sidebar>
       <SidebarHeader className="flex flex-row items-center justify-between gap-2 px-2 py-4">
         <div className="flex flex-row items-center gap-2 px-2">
           <div className="bg-primary/10 size-8 rounded-md"></div>
           <div className="text-md font-base text-primary tracking-tight">
-            what the sigma is abundant ui?
+            abundant ui
           </div>
         </div>
         <Button variant="ghost" className="size-8">
@@ -237,7 +245,7 @@ function ChatSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   onClick={() =>
-                    setIsAudioPlaybackEnabled((prev) => !prev)
+                    setAudioPlaybackEnabled((prev) => !prev)
                   }
                 >
                   <span>Audio playback</span>
@@ -252,31 +260,9 @@ function ChatSidebar({
       </SidebarContent>
     </Sidebar>
   );
-}
+});
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
-
-type BibleExcerptPayload = {
-  reference: string;
-  translation?: string;
-  text: string;
-};
-
-type SemanticResult = {
-  id: string;
-  reference: string;
-  summary: string;
-  relevance: number;
-};
-
-type SemanticSearchPayload = {
-  query: string;
-  results: SemanticResult[];
-};
+ChatSidebar.displayName = "ChatSidebar";
 
 type TodoPayload = {
   items: TodoItem[];
@@ -284,337 +270,378 @@ type TodoPayload = {
 };
 
 type ToolModalState =
-  | { type: "bible"; payload: BibleExcerptPayload }
-  | { type: "search"; payload: SemanticSearchPayload }
   | { type: "todo"; payload: TodoPayload };
 
-type ChatContentProps = {
-  prompt: string;
-  setPrompt: (value: string) => void;
-  isLoading: boolean;
-  isReady: boolean;
-  isVoiceEnabled: boolean;
-  onToggleVoice: () => void;
-  chatMessages: ChatMessage[];
-  onSubmit: () => void;
-  isOrbMode: boolean;
-  onToggleOrbMode: () => void;
-  orbLayer: React.ReactNode;
-};
-
-function ChatContent({
-  prompt,
-  setPrompt,
-  isLoading,
-  isReady,
-  isVoiceEnabled,
-  onToggleVoice,
-  chatMessages,
-  onSubmit,
-  isOrbMode,
-  onToggleOrbMode,
-  orbLayer,
-}: ChatContentProps) {
-  const isPromptDisabled = isVoiceEnabled && !isReady;
+const ChatHeader = React.memo(function ChatHeader() {
+  const { isOrbMode } = useChatOrb();
+  const { toggleOrbMode } = useChatActions();
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden">
-      <header className="bg-background z-10 flex h-16 w-full shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
-        <div className="text-foreground">erm what the sigma uwu O MAII GAHHHH UWU</div>
-        <div className="ml-auto">
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full"
-            onClick={onToggleOrbMode}
-          >
-            {isOrbMode ? "Show chat" : "Orb mode"}
-          </Button>
-        </div>
-      </header>
+    <header className="bg-background z-10 flex h-16 w-full shrink-0 items-center gap-2 border-b px-4">
+      <SidebarTrigger className="-ml-1" />
+      <div className="text-foreground">
+        abundant ui voice template
+      </div>
+      <div className="ml-auto">
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-full"
+          onClick={toggleOrbMode}
+        >
+          {isOrbMode ? "Show chat" : "Orb mode"}
+        </Button>
+      </div>
+    </header>
+  );
+});
 
+ChatHeader.displayName = "ChatHeader";
+
+const ChatMessagesView = React.memo(function ChatMessagesView() {
+  const { chatMessages, orbLayer } = useChatView();
+  const { isOrbMode } = useChatOrb();
+
+  return (
+    <div
+      className={cn(
+        "relative flex-1",
+        isOrbMode ? "overflow-hidden" : "overflow-y-auto"
+      )}
+    >
       <div
         className={cn(
-          "relative flex-1",
-          isOrbMode ? "overflow-hidden" : "overflow-y-auto"
+          "absolute inset-0 z-0 flex items-center justify-center transition-opacity duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          isOrbMode ? "opacity-100" : "pointer-events-none opacity-0"
         )}
       >
+        {orbLayer}
+      </div>
+      <ChatContainerRoot
+        className={cn(
+          "relative z-10 h-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          isOrbMode
+            ? "pointer-events-none scale-[0.98] opacity-0"
+            : "opacity-100"
+        )}
+        aria-hidden={isOrbMode}
+      >
+        <ChatContainerContent className="space-y-0 px-5 py-12">
+          {chatMessages.map((message, index) => {
+            return (
+              <MessageRow
+                key={message.id}
+                message={message}
+                isLastMessage={index === chatMessages.length - 1}
+              />
+            );
+          })}
+        </ChatContainerContent>
         <div
           className={cn(
-            "absolute inset-0 z-0 flex items-center justify-center transition-opacity duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            isOrbMode ? "opacity-100" : "pointer-events-none opacity-0"
+            "absolute bottom-4 left-1/2 flex w-full max-w-3xl -translate-x-1/2 justify-end px-5 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            isOrbMode ? "pointer-events-none opacity-0" : "opacity-100"
           )}
         >
-          {orbLayer}
+          <ScrollButton className="shadow-sm" />
         </div>
-        <ChatContainerRoot
-          className={cn(
-            "relative z-10 h-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            isOrbMode
-              ? "pointer-events-none scale-[0.98] opacity-0"
-              : "opacity-100"
-          )}
-          aria-hidden={isOrbMode}
-        >
-          <ChatContainerContent className="space-y-0 px-5 py-12">
-            {chatMessages.map((message, index) => {
-              const isAssistant = message.role === "assistant";
-              const isLastMessage = index === chatMessages.length - 1;
+      </ChatContainerRoot>
+    </div>
+  );
+});
 
-              return (
-                <Message
-                  key={message.id}
-                  className={cn(
-                    "mx-auto flex w-full max-w-3xl flex-col gap-2 px-6",
-                    isAssistant ? "items-start" : "items-end"
-                  )}
-                >
-                  {isAssistant ? (
-                    <div className="group flex w-full flex-col gap-0">
-                      <MessageContent
-                        className="text-foreground prose flex-1 rounded-lg bg-transparent p-0"
-                        markdown
-                      >
-                        {message.content}
-                      </MessageContent>
-                      <MessageActions
-                        className={cn(
-                          "-ml-2.5 flex gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100",
-                          isLastMessage && "opacity-100"
-                        )}
-                      >
-                        <MessageAction tooltip="Copy" delayDuration={100}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-full"
-                          >
-                            <Copy />
-                          </Button>
-                        </MessageAction>
-                        <MessageAction tooltip="Upvote" delayDuration={100}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-full"
-                          >
-                            <ThumbsUp />
-                          </Button>
-                        </MessageAction>
-                        <MessageAction tooltip="Downvote" delayDuration={100}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-full"
-                          >
-                            <ThumbsDown />
-                          </Button>
-                        </MessageAction>
-                      </MessageActions>
-                    </div>
-                  ) : (
-                    <div className="group flex flex-col items-end gap-1">
-                      <MessageContent className="bg-muted text-primary max-w-[85%] rounded-3xl px-5 py-2.5 sm:max-w-[75%]">
-                        {message.content}
-                      </MessageContent>
-                      <MessageActions
-                        className={cn(
-                          "flex gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                        )}
-                      >
-                        <MessageAction tooltip="Edit" delayDuration={100}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-full"
-                          >
-                            <Pencil />
-                          </Button>
-                        </MessageAction>
-                        <MessageAction tooltip="Delete" delayDuration={100}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-full"
-                          >
-                            <Trash />
-                          </Button>
-                        </MessageAction>
-                        <MessageAction tooltip="Copy" delayDuration={100}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-full"
-                          >
-                            <Copy />
-                          </Button>
-                        </MessageAction>
-                      </MessageActions>
-                    </div>
-                  )}
-                </Message>
-              );
-            })}
-          </ChatContainerContent>
-          <div
+ChatMessagesView.displayName = "ChatMessagesView";
+
+type MessageRowProps = {
+  message: ChatMessage;
+  isLastMessage: boolean;
+};
+
+const MessageRow = React.memo(function MessageRow({
+  message,
+  isLastMessage,
+}: MessageRowProps) {
+  const isAssistant = message.role === "assistant";
+
+  return (
+    <Message
+      className={cn(
+        "mx-auto flex w-full max-w-3xl flex-col gap-2 px-6",
+        isAssistant ? "items-start" : "items-end"
+      )}
+    >
+      {isAssistant ? (
+        <div className="group flex w-full flex-col gap-0">
+          <MessageContent
+            className="text-foreground prose flex-1 rounded-lg bg-transparent p-0"
+            markdown
+          >
+            {message.content}
+          </MessageContent>
+          <MessageActions
             className={cn(
-              "absolute bottom-4 left-1/2 flex w-full max-w-3xl -translate-x-1/2 justify-end px-5 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
-              isOrbMode ? "pointer-events-none opacity-0" : "opacity-100"
+              "-ml-2.5 flex gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100",
+              isLastMessage && "opacity-100"
             )}
           >
-            <ScrollButton className="shadow-sm" />
-          </div>
-        </ChatContainerRoot>
-      </div>
-
-      <div className="bg-background z-10 shrink-0 px-3 pb-3 md:px-5 md:pb-5">
-        <div className="mx-auto max-w-3xl">
-          <PromptInput
-            isLoading={isLoading}
-            value={prompt}
-            onValueChange={setPrompt}
-            onSubmit={onSubmit}
-            disabled={isPromptDisabled}
-            className="border-input bg-popover relative z-10 w-full rounded-3xl border p-0 pt-1 shadow-xs"
-          >
-            <div className="flex flex-col">
-              <PromptInputTextarea
-                placeholder={
-                  isVoiceEnabled
-                    ? isReady
-                      ? "Ask anything"
-                      : "Connecting..."
-                    : "Enable voice to start"
-                }
-                className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
-              />
-
-              <PromptInputActions className="mt-5 flex w-full items-center justify-between gap-2 px-3 pb-3">
-                <div className="flex items-center gap-2">
-                  <PromptInputAction tooltip="Add a new action">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="size-9 rounded-full"
-                      disabled={!isReady}
-                    >
-                      <Plus size={18} />
-                    </Button>
-                  </PromptInputAction>
-
-                  <PromptInputAction tooltip="Search">
-                    <Button
-                      variant="outline"
-                      className="rounded-full"
-                      disabled={!isReady}
-                    >
-                      <Globe size={18} />
-                      Search
-                    </Button>
-                  </PromptInputAction>
-
-                  <PromptInputAction tooltip="More actions">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="size-9 rounded-full"
-                      disabled={!isReady}
-                    >
-                      <MoreHorizontal size={18} />
-                    </Button>
-                  </PromptInputAction>
-                </div>
-                <div className="flex items-center gap-2">
-                  <PromptInputAction
-                    tooltip={isVoiceEnabled ? "Disable voice" : "Enable voice"}
-                    allowWhenDisabled
-                  >
-                    <Button
-                      variant={isVoiceEnabled ? "default" : "outline"}
-                      className="rounded-full"
-                      onClick={onToggleVoice}
-                    >
-                      <Mic size={18} />
-                      {isVoiceEnabled ? "Voice on" : "Enable voice"}
-                    </Button>
-                  </PromptInputAction>
-
-                  <Button
-                    size="icon"
-                    disabled={!prompt.trim() || !isReady}
-                    onClick={onSubmit}
-                    className="size-9 rounded-full"
-                  >
-                    {!isLoading ? (
-                      <ArrowUp size={18} />
-                    ) : (
-                      <span className="size-3 rounded-xs bg-white" />
-                    )}
-                  </Button>
-                </div>
-              </PromptInputActions>
-            </div>
-          </PromptInput>
+            <MessageAction tooltip="Copy" delayDuration={100}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+              >
+                <Copy />
+              </Button>
+            </MessageAction>
+            <MessageAction tooltip="Upvote" delayDuration={100}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+              >
+                <ThumbsUp />
+              </Button>
+            </MessageAction>
+            <MessageAction tooltip="Downvote" delayDuration={100}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+              >
+                <ThumbsDown />
+              </Button>
+            </MessageAction>
+          </MessageActions>
         </div>
+      ) : (
+        <div className="group flex flex-col items-end gap-1">
+          <MessageContent className="bg-muted text-primary max-w-[85%] rounded-3xl px-5 py-2.5 sm:max-w-[75%]">
+            {message.content}
+          </MessageContent>
+          <MessageActions
+            className={cn(
+              "flex gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+            )}
+          >
+            <MessageAction tooltip="Edit" delayDuration={100}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+              >
+                <Pencil />
+              </Button>
+            </MessageAction>
+            <MessageAction tooltip="Delete" delayDuration={100}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+              >
+                <Trash />
+              </Button>
+            </MessageAction>
+            <MessageAction tooltip="Copy" delayDuration={100}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+              >
+                <Copy />
+              </Button>
+            </MessageAction>
+          </MessageActions>
+        </div>
+      )}
+    </Message>
+  );
+});
+
+MessageRow.displayName = "MessageRow";
+
+function ChatComposer() {
+  const { isLoading, isReady, isVoiceEnabled } = useChatStatus();
+  const { toggleVoice, submitPrompt } = useChatActions();
+  const isPromptDisabled = isVoiceEnabled && !isReady;
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const sendButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [clearSignal, setClearSignal] = useState(0);
+
+  const handleSubmit = () => {
+    const value = textareaRef.current?.value?.trim() ?? "";
+    if (!value || !isReady) return;
+    submitPrompt(value);
+    setClearSignal((prev) => prev + 1);
+    if (sendButtonRef.current) {
+      sendButtonRef.current.disabled = true;
+    }
+  };
+
+  const handleInputValueChange = (value: string) => {
+    if (!sendButtonRef.current) return;
+    sendButtonRef.current.disabled = !value.trim() || !isReady;
+  };
+
+  useEffect(() => {
+    if (!sendButtonRef.current) return;
+    const value = textareaRef.current?.value ?? "";
+    sendButtonRef.current.disabled = !value.trim() || !isReady;
+  }, [isReady]);
+
+  return (
+    <div className="bg-background z-10 shrink-0 px-3 pb-3 md:px-5 md:pb-5">
+      <div className="mx-auto max-w-3xl">
+        <PromptInput
+          isLoading={isLoading}
+          onValueChange={handleInputValueChange}
+          onSubmit={handleSubmit}
+          disabled={isPromptDisabled}
+          clearSignal={clearSignal}
+          textareaRef={textareaRef}
+          className="border-input bg-popover relative z-10 w-full rounded-3xl border p-0 pt-1 shadow-xs"
+        >
+          <div className="flex flex-col">
+            <PromptInputTextarea
+              placeholder={
+                isVoiceEnabled
+                  ? isReady
+                    ? "Ask anything"
+                    : "Connecting..."
+                  : "Enable voice to start"
+              }
+              className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
+            />
+
+            <PromptInputActions className="mt-5 flex w-full items-center justify-between gap-2 px-3 pb-3">
+              <ChatComposerActions />
+              <ChatComposerSubmit
+                buttonRef={sendButtonRef}
+                isLoading={isLoading}
+                isReady={isReady}
+                onSubmit={handleSubmit}
+              />
+            </PromptInputActions>
+          </div>
+        </PromptInput>
       </div>
-    </main>
+    </div>
   );
 }
 
-function FullChatApp({
-  isAudioPlaybackEnabled,
-  setIsAudioPlaybackEnabled,
-  isVoiceEnabled,
-  onToggleVoice,
-  prompt,
-  setPrompt,
+const ChatComposerActions = React.memo(function ChatComposerActions() {
+  const { isReady, isVoiceEnabled } = useChatStatus();
+  const { toggleVoice } = useChatActions();
+
+  return (
+    <div className="w-full flex flex-row justify-between">
+      <div className="flex items-center  gap-2">
+        <PromptInputAction tooltip="Add a new action">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-9 rounded-full"
+            disabled={!isReady}
+          >
+            <Plus size={18} />
+          </Button>
+        </PromptInputAction>
+
+        <PromptInputAction tooltip="Search">
+          <Button
+            variant="outline"
+            className="rounded-full"
+            disabled={!isReady}
+          >
+            <Globe size={18} />
+            Search
+          </Button>
+        </PromptInputAction>
+
+        <PromptInputAction tooltip="More actions">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-9 rounded-full"
+            disabled={!isReady}
+          >
+            <MoreHorizontal size={18} />
+          </Button>
+        </PromptInputAction>
+      </div>
+      
+        <PromptInputAction
+          tooltip={isVoiceEnabled ? "Disable voice" : "Enable voice"}
+          allowWhenDisabled
+        >
+          <Button
+            variant={isVoiceEnabled ? "default" : "outline"}
+            className="rounded-full"
+            onClick={toggleVoice}
+          >
+            <Mic size={18} />
+            {isVoiceEnabled ? "Disconnect" : "Connect"}
+          </Button>
+        </PromptInputAction>
+    </div>
+  );
+});
+
+ChatComposerActions.displayName = "ChatComposerActions";
+
+function ChatComposerSubmit({
+  buttonRef,
   isLoading,
   isReady,
-  chatMessages,
   onSubmit,
-  isOrbMode,
-  onToggleOrbMode,
-  orbLayer,
 }: {
-  isAudioPlaybackEnabled: boolean;
-  setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  isVoiceEnabled: boolean;
-  onToggleVoice: () => void;
-  prompt: string;
-  setPrompt: (value: string) => void;
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
   isLoading: boolean;
   isReady: boolean;
-  chatMessages: ChatMessage[];
   onSubmit: () => void;
-  isOrbMode: boolean;
-  onToggleOrbMode: () => void;
-  orbLayer: React.ReactNode;
 }) {
   return (
+    <div className="flex items-center gap-2">
+      <Button
+        ref={buttonRef}
+        size="icon"
+        disabled={!isReady}
+        onClick={onSubmit}
+        className="size-9 rounded-full"
+      >
+        {!isLoading ? (
+          <ArrowUp size={18} />
+        ) : (
+          <span className="size-3 rounded-xs bg-white" />
+        )}
+      </Button>
+    </div>
+  );
+}
+
+const ChatContent = React.memo(function ChatContent() {
+  return (
+    <main className="flex h-screen flex-col overflow-hidden">
+      <ChatHeader />
+      <ChatMessagesView />
+      <ChatComposer />
+    </main>
+  );
+});
+
+ChatContent.displayName = "ChatContent";
+
+const FullChatApp = React.memo(function FullChatApp() {
+  return (
     <SidebarProvider>
-      <ChatSidebar
-        isAudioPlaybackEnabled={isAudioPlaybackEnabled}
-        setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
-      />
+      <ChatSidebar />
       <SidebarInset>
-        <ChatContent
-          prompt={prompt}
-          setPrompt={setPrompt}
-          isLoading={isLoading}
-          isReady={isReady}
-          isVoiceEnabled={isVoiceEnabled}
-          onToggleVoice={onToggleVoice}
-          chatMessages={chatMessages}
-          onSubmit={onSubmit}
-          isOrbMode={isOrbMode}
-          onToggleOrbMode={onToggleOrbMode}
-          orbLayer={orbLayer}
-        />
+        <ChatContent />
       </SidebarInset>
     </SidebarProvider>
   );
-}
+});
+
+FullChatApp.displayName = "FullChatApp";
 
 function App() {
   const {
@@ -622,7 +649,7 @@ function App() {
     addTranscriptBreadcrumb,
     transcriptItems,
   } = useTranscript();
-  const { logClientEvent, logServerEvent } = useEvent();
+  
 
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
   const [selectedAgentConfigSet, setSelectedAgentConfigSet] = useState<
@@ -648,8 +675,17 @@ function App() {
   const connectInFlightRef = useRef(false);
   const speakingStopTimeoutRef = useRef<number | null>(null);
   const assistantSpeakingRef = useRef(false);
+  const assistantThinkingRef = useRef(false);
+  const userSpeakingRef = useRef(false);
   const lastAssistantAudioMsRef = useRef(0);
-  const lastAppStateRef = useRef<Record<string, any> | null>(null);
+  const chatMessageCacheRef = useRef(new Map<string, ChatMessage>());
+  const orbStateRef = useRef<OrbState>("idle");
+  const orbAudioSourceRef = useRef<OrbAudioSource>("idle");
+  const orbIsListeningRef = useRef(false);
+  const orbStateStartTimeRef = useRef<number>(
+    typeof performance !== "undefined" ? performance.now() : Date.now()
+  );
+  const lastOrbModeRef = useRef<"chat" | "orb">("chat");
 
   const { snapshot: appSnapshot, send: sendAppEvent } = useAppMachine({
     initialAudioPlaybackEnabled: true,
@@ -661,67 +697,8 @@ function App() {
     voiceEnabled: isVoiceEnabled,
     audioPlaybackEnabled: isAudioPlaybackEnabled,
     sessionStatus,
-    prompt,
-    userSpeaking,
-    assistantThinking,
-    assistantSpeaking,
-    orbState,
-    orbAudioSource,
-    orbIsListening,
-    orbStateStartTimeMs: orbStateStartTime,
   } = appSnapshot.context;
   const isOrbMode = mode === "orb";
-
-  useEffect(() => {
-    const nextState = {
-      mode,
-      sessionStatus,
-      voiceEnabled: isVoiceEnabled,
-      audioPlaybackEnabled: isAudioPlaybackEnabled,
-      userSpeaking,
-      assistantThinking,
-      assistantSpeaking,
-      orbState,
-      orbAudioSource,
-      orbIsListening,
-      orbStateStartTime,
-    };
-
-    const prevState = lastAppStateRef.current;
-    if (!prevState) {
-      postClientLog({ type: "app.state.init", payload: nextState });
-      lastAppStateRef.current = nextState;
-      return;
-    }
-
-    const diff: Record<string, { from: any; to: any }> = {};
-    (Object.keys(nextState) as Array<keyof typeof nextState>).forEach((key) => {
-      if (!Object.is(prevState[key], nextState[key])) {
-        diff[key] = { from: prevState[key], to: nextState[key] };
-      }
-    });
-
-    if (Object.keys(diff).length > 0) {
-      postClientLog({
-        type: "app.state.change",
-        payload: { diff, next: nextState },
-      });
-    }
-
-    lastAppStateRef.current = nextState;
-  }, [
-    mode,
-    sessionStatus,
-    isVoiceEnabled,
-    isAudioPlaybackEnabled,
-    userSpeaking,
-    assistantThinking,
-    assistantSpeaking,
-    orbState,
-    orbAudioSource,
-    orbIsListening,
-    orbStateStartTime,
-  ]);
 
   const sdkAudioElement = useMemo(() => {
     if (typeof window === "undefined") return undefined;
@@ -740,13 +717,6 @@ function App() {
     }
   }, [sdkAudioElement]);
 
-  const setPrompt = useCallback(
-    (value: string) => {
-      sendAppEvent({ type: "PROMPT_CHANGED", value });
-    },
-    [sendAppEvent]
-  );
-
   const setIsAudioPlaybackEnabled = useCallback(
     (value: React.SetStateAction<boolean>) => {
       const nextValue =
@@ -756,6 +726,77 @@ function App() {
     [isAudioPlaybackEnabled, sendAppEvent]
   );
 
+  const getNowMs = () =>
+    typeof performance !== "undefined" ? performance.now() : Date.now();
+
+  const getOrbPhase = (state: OrbState) => {
+    if (state === "listen" || state === "think" || state === "speak") {
+      return "active";
+    }
+    return state;
+  };
+
+  const syncOrbView = useCallback(
+    (reason: string) => {
+      const isConnected = sessionStatus === "CONNECTED";
+      let nextState: OrbState;
+      let nextAudioSource: OrbAudioSource;
+      let nextIsListening: boolean;
+
+      if (!isVoiceEnabled || !isConnected) {
+        nextState = isOrbMode ? "listen" : "idle";
+        nextAudioSource = "idle";
+        nextIsListening = isOrbMode;
+      } else if (assistantSpeakingRef.current) {
+        nextState = "speak";
+        nextAudioSource = "output";
+        nextIsListening = false;
+      } else if (assistantThinkingRef.current) {
+        nextState = "think";
+        nextAudioSource = "idle";
+        nextIsListening = false;
+      } else {
+        const userSpeaking = userSpeakingRef.current;
+        nextState = "listen";
+        nextAudioSource = userSpeaking ? "mic" : "idle";
+        nextIsListening = !userSpeaking;
+      }
+
+      const prevState = orbStateRef.current;
+      const prevPhase = getOrbPhase(prevState);
+      const nextPhase = getOrbPhase(nextState);
+      const modeActivated = lastOrbModeRef.current !== "orb" && isOrbMode;
+      const shouldResetStartTime = modeActivated || prevPhase !== nextPhase;
+
+      if (shouldResetStartTime) {
+        orbStateStartTimeRef.current = getNowMs();
+      }
+
+      orbStateRef.current = nextState;
+      orbAudioSourceRef.current = nextAudioSource;
+      orbIsListeningRef.current = nextIsListening;
+      lastOrbModeRef.current = isOrbMode ? "orb" : "chat";
+
+      void reason;
+    },
+    [isOrbMode, isVoiceEnabled, sessionStatus]
+  );
+
+  useEffect(() => {
+    if (!isVoiceEnabled || sessionStatus !== "CONNECTED") {
+      assistantSpeakingRef.current = false;
+      assistantThinkingRef.current = false;
+      userSpeakingRef.current = false;
+    }
+    syncOrbView("app_state_change");
+  }, [isOrbMode, isVoiceEnabled, sessionStatus, syncOrbView]);
+
+  useEffect(() => {
+    if (audioElement) {
+      syncOrbView("audio_element_ready");
+    }
+  }, [audioElement, syncOrbView]);
+
   const clearSpeakingStopTimeout = useCallback(() => {
     if (speakingStopTimeoutRef.current !== null) {
       window.clearTimeout(speakingStopTimeoutRef.current);
@@ -764,20 +805,18 @@ function App() {
   }, []);
 
   const stopAssistantSpeakingNow = useCallback(
-    (reason: string, emitEvent: boolean = true) => {
+    (reason: string) => {
       clearSpeakingStopTimeout();
       if (assistantSpeakingRef.current) {
-        if (emitEvent) {
-          sendAppEvent({ type: "ASSISTANT_SPEAKING_STOP" });
-        }
         assistantSpeakingRef.current = false;
         postClientLog({
           type: "assistant.speaking.stop",
           payload: { reason },
         });
+        syncOrbView("assistant_speaking_stop");
       }
     },
-    [clearSpeakingStopTimeout, sendAppEvent]
+    [clearSpeakingStopTimeout, syncOrbView]
   );
 
   const scheduleAssistantSpeakingStop = useCallback(() => {
@@ -797,16 +836,17 @@ function App() {
     (source: string) => {
       lastAssistantAudioMsRef.current = Date.now();
       if (!assistantSpeakingRef.current) {
-        sendAppEvent({ type: "ASSISTANT_SPEAKING_START" });
         assistantSpeakingRef.current = true;
+        assistantThinkingRef.current = false;
         postClientLog({
           type: "assistant.speaking.start",
           payload: { source },
         });
+        syncOrbView("assistant_speaking_start");
       }
       scheduleAssistantSpeakingStop();
     },
-    [scheduleAssistantSpeakingStop, sendAppEvent]
+    [scheduleAssistantSpeakingStop, syncOrbView]
   );
 
   useEffect(() => {
@@ -831,10 +871,6 @@ function App() {
   }, [audioElement, markAssistantAudioActivity, scheduleAssistantSpeakingStop]);
 
   useEffect(() => {
-    assistantSpeakingRef.current = assistantSpeaking;
-  }, [assistantSpeaking]);
-
-  useEffect(() => {
     return () => {
       clearSpeakingStopTimeout();
     };
@@ -845,13 +881,17 @@ function App() {
       const transportEvent = event?.event ?? event;
       switch (transportEvent.type) {
         case "input_audio_buffer.speech_started":
-          sendAppEvent({ type: "USER_SPEECH_START" });
+          userSpeakingRef.current = true;
+          syncOrbView("user_speech_start");
           break;
         case "input_audio_buffer.speech_stopped":
-          sendAppEvent({ type: "USER_SPEECH_STOP" });
+          userSpeakingRef.current = false;
+          syncOrbView("user_speech_stop");
           break;
         case "response.created":
-          sendAppEvent({ type: "ASSISTANT_THINKING_START" });
+          assistantThinkingRef.current = true;
+          assistantSpeakingRef.current = false;
+          syncOrbView("assistant_thinking_start");
           break;
         case "output_audio_buffer.started":
         case "response.audio.delta":
@@ -863,13 +903,16 @@ function App() {
           break;
         case "response.done":
         case "response.cancelled":
-          stopAssistantSpeakingNow(transportEvent.type, false);
-          sendAppEvent({ type: "ASSISTANT_IDLE" });
+          assistantThinkingRef.current = false;
+          stopAssistantSpeakingNow(transportEvent.type);
+          syncOrbView("assistant_done");
           break;
         case "error":
-          stopAssistantSpeakingNow("error", false);
-          sendAppEvent({ type: "ASSISTANT_IDLE" });
-          sendAppEvent({ type: "USER_SPEECH_STOP" });
+          assistantThinkingRef.current = false;
+          assistantSpeakingRef.current = false;
+          userSpeakingRef.current = false;
+          stopAssistantSpeakingNow("error");
+          syncOrbView("error");
           break;
         default:
           break;
@@ -878,14 +921,14 @@ function App() {
     [
       markAssistantAudioActivity,
       scheduleAssistantSpeakingStop,
-      sendAppEvent,
+      syncOrbView,
       stopAssistantSpeakingNow,
     ]
   );
 
   const orbAudioMetricsRef = useOrbAudioMetrics({
-    isActive: isOrbMode,
-    sourceMode: orbAudioSource,
+    isActive: true,
+    sourceModeRef: orbAudioSourceRef,
     audioElement,
     outputStream: orbOutputStream,
     enableMic: isVoiceEnabled,
@@ -901,6 +944,11 @@ function App() {
 
   const handleConnectionChange = useCallback(
     (s: SessionStatus) => {
+      if (s !== "CONNECTED") {
+        assistantSpeakingRef.current = false;
+        assistantThinkingRef.current = false;
+        userSpeakingRef.current = false;
+      }
       sendAppEvent({ type: "SET_SESSION_STATUS", status: s as SessionStatus });
     },
     [sendAppEvent]
@@ -943,27 +991,27 @@ function App() {
     (eventObj: any, eventNameSuffix = "") => {
       try {
         sendEvent(eventObj);
-        logClientEvent(eventObj, eventNameSuffix);
+        
       } catch {
       }
     },
-    [logClientEvent, sendEvent]
+    [ sendEvent]
   );
 
   const fetchEphemeralKey = useCallback(async (): Promise<string | null> => {
-    logClientEvent({ url: "/session" }, "fetch_session_token_request");
+    
     const tokenResponse = await fetch("/api/session");
     const data = await tokenResponse.json();
-    logServerEvent(data, "fetch_session_token_response");
+    
 
     if (!data.client_secret?.value) {
-      logClientEvent(data, "error.no_ephemeral_key");
+    
       sendAppEvent({ type: "SET_SESSION_STATUS", status: "DISCONNECTED" });
       return null;
     }
 
     return data.client_secret.value;
-  }, [logClientEvent, logServerEvent, sendAppEvent]);
+  }, [sendAppEvent]);
 
   const connectToRealtime = useCallback(async () => {
     const agentSetKey = defaultAgentSetKey;
@@ -1137,18 +1185,19 @@ function App() {
     }
   }, [sendAppEvent]);
 
-  const handleSubmit = () => {
-    const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt || sessionStatus !== "CONNECTED") return;
-    interrupt();
+  const handleSubmitPrompt = useCallback(
+    (value: string) => {
+      const trimmedPrompt = value.trim();
+      if (!trimmedPrompt || sessionStatus !== "CONNECTED") return;
+      interrupt();
 
-    try {
-      sendUserText(trimmedPrompt);
-    } catch {
-    }
-
-    sendAppEvent({ type: "CLEAR_PROMPT" });
-  };
+      try {
+        sendUserText(trimmedPrompt);
+      } catch {
+      }
+    },
+    [interrupt, sendUserText, sessionStatus]
+  );
 
   useEffect(() => {
     if (!preferencesHydratedRef.current) return;
@@ -1207,17 +1256,6 @@ function App() {
 
     const payload = latest.data ?? {};
     switch (toolName) {
-      case "getBibleExcerpt": {
-        setToolModal({ type: "bible", payload: payload as BibleExcerptPayload });
-        break;
-      }
-      case "searchBibleSemantic": {
-        setToolModal({
-          type: "search",
-          payload: payload as SemanticSearchPayload,
-        });
-        break;
-      }
       case "getTodoList":
       case "addTodoItem":
       case "completeTodoItem": {
@@ -1238,18 +1276,90 @@ function App() {
   }, [transcriptItems, lastToolBreadcrumbId]);
 
   const chatMessages = useMemo<ChatMessage[]>(() => {
-    return [...transcriptItems]
+    const nextItems = [...transcriptItems]
       .filter((item) => item.type === "MESSAGE" && !item.isHidden)
-      .sort((a, b) => a.createdAtMs - b.createdAtMs)
-      .map((item) => ({
-        id: item.itemId,
-        role: item.role ?? "assistant",
-        content: item.title ?? "",
-      }));
+      .sort((a, b) => a.createdAtMs - b.createdAtMs);
+    const nextMessages: ChatMessage[] = [];
+    const nextIds = new Set<string>();
+    const cache = chatMessageCacheRef.current;
+
+    for (const item of nextItems) {
+      const id = item.itemId;
+      const role = item.role ?? "assistant";
+      const content = item.title ?? "";
+      nextIds.add(id);
+
+      const cached = cache.get(id);
+      if (cached && cached.role === role && cached.content === content) {
+        nextMessages.push(cached);
+        continue;
+      }
+
+      const nextMessage = { id, role, content };
+      cache.set(id, nextMessage);
+      nextMessages.push(nextMessage);
+    }
+
+    for (const id of cache.keys()) {
+      if (!nextIds.has(id)) {
+        cache.delete(id);
+      }
+    }
+
+    return nextMessages;
   }, [transcriptItems]);
+
+  const orbLayer = useMemo(
+    () => (
+      <OrbVisualizationClient
+        audioMetricsRef={orbAudioMetricsRef}
+        orbStateRef={orbStateRef}
+        stateStartTimeMsRef={orbStateStartTimeRef}
+        isListeningRef={orbIsListeningRef}
+        size={320}
+        className="h-full w-full"
+      />
+    ),
+    [orbAudioMetricsRef, orbIsListeningRef, orbStateRef, orbStateStartTimeRef]
+  );
 
   const isReady = sessionStatus === "CONNECTED";
   const isLoading = sessionStatus === "CONNECTING";
+
+  const chatStatus = useMemo(
+    () => ({
+      isAudioPlaybackEnabled,
+      isVoiceEnabled,
+      isReady,
+      isLoading,
+    }),
+    [isAudioPlaybackEnabled, isLoading, isReady, isVoiceEnabled]
+  );
+
+  const chatOrb = useMemo(
+    () => ({ isOrbMode }),
+    [isOrbMode]
+  );
+
+  const chatActions = useMemo(
+    () => ({
+      toggleVoice: handleToggleVoice,
+      toggleOrbMode: handleToggleOrbMode,
+      submitPrompt: handleSubmitPrompt,
+      setAudioPlaybackEnabled: setIsAudioPlaybackEnabled,
+    }),
+    [
+      handleSubmitPrompt,
+      handleToggleOrbMode,
+      handleToggleVoice,
+      setIsAudioPlaybackEnabled,
+    ]
+  );
+
+  const chatView = useMemo(
+    () => ({ chatMessages, orbLayer }),
+    [chatMessages, orbLayer]
+  );
 
   const handleModalClose = () => {
     setToolModal(null);
@@ -1272,76 +1382,22 @@ function App() {
 
   return (
     <>
-      <FullChatApp
-        isAudioPlaybackEnabled={isAudioPlaybackEnabled}
-        setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
-        isVoiceEnabled={isVoiceEnabled}
-        onToggleVoice={handleToggleVoice}
-        prompt={prompt}
-        setPrompt={setPrompt}
-        isLoading={isLoading}
-        isReady={isReady}
-        chatMessages={chatMessages}
-        onSubmit={handleSubmit}
-        isOrbMode={isOrbMode}
-        onToggleOrbMode={handleToggleOrbMode}
-        orbLayer={
-          <OrbVisualizationClient
-            audioMetricsRef={orbAudioMetricsRef}
-            orbState={orbState}
-            stateStartTimeMs={orbStateStartTime}
-            isListening={orbIsListening}
-            size={320}
-            className="h-full w-full"
-          />
-        }
-      />
+      <TooltipProvider>
+        <ChatStatusProvider value={chatStatus}>
+          <ChatOrbProvider value={chatOrb}>
+            <ChatActionsProvider value={chatActions}>
+              <ChatViewProvider value={chatView}>
+                <FullChatApp />
+              </ChatViewProvider>
+            </ChatActionsProvider>
+          </ChatOrbProvider>
+        </ChatStatusProvider>
+      </TooltipProvider>
       <ToolModal
         open={Boolean(toolModal)}
-        title={
-          toolModal?.type === "bible"
-            ? "Bible Excerpt"
-            : toolModal?.type === "search"
-              ? "Related Passages"
-              : "Todo List"
-        }
+        title="Todo List"
         onClose={handleModalClose}
       >
-        {toolModal?.type === "bible" && (
-          <div className="space-y-3">
-            <div className="text-sm text-muted-foreground">
-              {toolModal.payload.reference}
-              {toolModal.payload.translation
-                ? ` · ${toolModal.payload.translation}`
-                : ""}
-            </div>
-            <p className="text-base text-foreground">
-              {toolModal.payload.text}
-            </p>
-          </div>
-        )}
-        {toolModal?.type === "search" && (
-          <div className="space-y-4">
-            <div className="text-sm text-muted-foreground">
-              Query: {toolModal.payload.query}
-            </div>
-            <div className="space-y-2">
-              {toolModal.payload.results.map((result) => (
-                <div
-                  key={result.id}
-                  className="rounded-lg border border-border p-3"
-                >
-                  <div className="text-sm font-medium text-foreground">
-                    {result.reference}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {result.summary}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
         {toolModal?.type === "todo" && (
           <div className="space-y-4">
             {toolModal.payload.error && (

@@ -5,7 +5,7 @@ export type TodoItem = {
   createdAt: number;
 };
 
-const STORAGE_KEY = "biblechat.todo.items";
+const STORAGE_KEY = "todoapp.todo.items";
 
 function readTodos(): TodoItem[] {
   if (typeof window === "undefined") return [];

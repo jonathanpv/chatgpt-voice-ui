@@ -1,16 +1,19 @@
 import React, { Suspense } from "react";
 import { TranscriptProvider } from "@/app/contexts/TranscriptContext";
-import { EventProvider } from "@/app/contexts/EventContext";
+
+import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "./App";
 
 export default function Page() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <TranscriptProvider>
-        <EventProvider>
+      <TooltipProvider>
+        <TranscriptProvider>
+          
           <App />
-        </EventProvider>
-      </TranscriptProvider>
+          
+        </TranscriptProvider>
+      </TooltipProvider>
     </Suspense>
   );
 }
